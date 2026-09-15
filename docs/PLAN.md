@@ -430,8 +430,12 @@ Zlib/Digest/pack('C*')）：
 
 ### 工具链备忘
 
-系统 ruby 2.6 无 bundler 2.7.2——所有命令先 `export PATH="$HOME/.rbenv/shims:$PATH"`
-（rbenv ruby 3.3.5）。CI 走 ruby/setup-ruby 无此坑。
+~~系统 ruby 2.6 无 bundler 2.7.2——所有命令先 `export PATH="$HOME/.rbenv/shims:$PATH"`
+（rbenv ruby 3.3.5）。~~ **2026-09-15 晚更新**：该机器已换成系统 ruby 4.0.6 +
+bundler 4.0.20，且 `~/.rbenv` 已不存在——现在测试/编译/dev server
+全部可直接跑（`bundle exec rake test`、`bin/citrine dev ...`），不需要
+rbenv shims 前缀。`.ruby-version`（3.3.5）仅对仍装 rbenv 的环境有意义。
+CI 走 ruby/setup-ruby 无此坑。
 
 
 ### 独立宿主与首个第三方应用（2026-09-15 追加）
