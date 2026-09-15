@@ -226,6 +226,10 @@
   .installed-app-row { display: flex; align-items: center; gap: 8px;
                        padding: 4px 6px; border-radius: var(--radius); }
   .installed-app-row:hover { background: #ffffff0d; }
+
+  /* 窗口内容：.panel-body 是 flex 容器，溢出内容默认被 flex-shrink 压缩而非滚动
+     （长列表裁切 bug 的根源），禁止收缩交给 overflow:auto */
+  .panel-body * { flex-shrink: 0; }
 </style>
 </head>
 <body>

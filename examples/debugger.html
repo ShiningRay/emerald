@@ -227,10 +227,16 @@
                        padding: 4px 6px; border-radius: var(--radius); }
   .installed-app-row:hover { background: #ffffff0d; }
 
+  /* 窗口内容同样的问题：.panel-body 是 flex 容器，溢出内容被压缩而非滚动 */
+  .panel-body * { flex-shrink: 0; }
+
   /* ── DevTools 调试浮层（debugger.html）────────────────── */
   #devtools { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; z-index: 6000;
               background: #0d1117f2; border-left: 1px solid var(--line);
               font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  /* stack 是 flex 纵向容器：固定高度下子项默认 flex-shrink:1 会把行压扁而非滚动
+     （长列表裁切 bug 的根源），全部禁止收缩，交给 overflow:auto */
+  #devtools * { flex-shrink: 0; }
   #devtools .dbg-head { color: #4f8cff; font-weight: 700; margin: 10px 0 3px; }
   #devtools .dbg-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #devtools .dbg-dim { color: #7d8aa5; }

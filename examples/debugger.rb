@@ -32,13 +32,34 @@ class DebugPanel < Citrine::Component
 
   # 拉取四个探针的最新数据；内容没变就不赋值——避免面板自己的 state 写入
   # 反过来灌爆 write_log（每次 poll 四条记录）。
+  # 注意：Opal 下数组/哈希的 == 深比较疑似恒 false，必须用指纹串比较（M5 同口径）；
+  # 且显示侧要过滤面板自身信号——否则自写入会实时刷出满屏噪声。
   def poll
-    snap = Citrine.debug_write_log.to_a.last(40).reverse
-    self.writes = snap unless snap == writes
-    snap = Citrine.debug_flush_trace.to_a.last(15).reverse
-    self.flushes = snap unless snap == flushes
-    snap = Citrine.debug_event_stream.to_a.last(15).reverse
-    self.events = snap unless snap == events
+    raw_writes = Citrine.debug_write_log.to_a.last(40).reverse
+    fp = raw_writes.map(&:inspect).join
+    if fp != @writes_fp
+      @writes_fp = fp
+      self.writes = raw_writes.reject { |w| own_signal_ids.include?(w[:signal_id]) }
+    end
+
+    raw_flushes = Citrine.debug_flush_trace.to_a.last(15).reverse
+    fp = raw_flushes.map(&:inspect).join
+    if fp != @flushes_fp
+      @flushes_fp = fp
+      # 只过滤"触发集 ⊆ 面板自身"的 flush——真实 flush 里混有自身信号仍保留显示
+      self.flushes = raw_flushes.reject do |f|
+        triggers = f[:trigger_signal_ids] || []
+        triggers.any? && (triggers - own_signal_ids).empty?
+      end
+    end
+
+    raw_events = Citrine.debug_event_stream.to_a.last(15).reverse
+    fp = raw_events.map(&:inspect).join
+    if fp != @events_fp
+      @events_fp = fp
+      self.events = raw_events.reject { |e| e[:target_component].to_s == "DebugPanel" }
+    end
+
     lines = []
     comp_tree = Citrine.debug_component_tree(DBG_ROOT)
     if comp_tree && comp_tree[:children].empty?
@@ -49,7 +70,11 @@ class DebugPanel < Citrine::Component
       build_tree_lines(comp_tree, 0, lines)
       self.tree_kind = :components unless tree_kind == :components
     end
-    self.tree_lines = lines unless lines == tree_lines
+    tree_fp = lines.join
+    if tree_fp != @tree_fp
+      @tree_fp = tree_fp
+      self.tree_lines = lines
+    end
     Beryl::Timer.after(400) { poll }
   end
 
@@ -117,8 +142,8 @@ class DebugPanel < Citrine::Component
 
   def fmt_flush(f)
     triggers = (f[:trigger_signal_ids] || []).map { |id| short_id(id) }.join(",")
-    total = f[:effects].sum { |e| e[:duration_ms] }
-    fx = f[:effects].map { |e| "fx#{short_id(e[:effect_id])}×#{e[:runs]} #{e[:duration_ms]}ms" }.join(" ")
+    total = f[:effects].sum { |e| e[:duration_ms] }.round(2)
+    fx = f[:effects].map { |e| "fx#{short_id(e[:effect_id])}×#{e[:runs]} #{e[:duration_ms].round(2)}ms" }.join(" ")
     "flush##{f[:flush_id]}  #{total}ms  触发[#{triggers}]  #{fx}"
   end
 
@@ -126,6 +151,10 @@ class DebugPanel < Citrine::Component
     flushes = (e[:flush_ids] || []).join(",")
     "ev #{e[:event_type]}  #{e[:target_component]}##{short_id(e[:component_id])}" \
       "  h=#{e[:handler_name]}  →flush[#{flushes}]"
+  end
+
+  def own_signal_ids
+    @own_signal_ids ||= %i[writes flushes events tree_lines tree_kind demo].map { |name| signal(name).object_id }
   end
 
   # 组件树条目（有组件边界时）：一个组件一行
