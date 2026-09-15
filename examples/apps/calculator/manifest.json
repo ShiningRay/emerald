@@ -1,0 +1,21 @@
+{
+  "spec": 1,
+  "kind": "app",
+  "id": "calculator",
+  "name": "计算器",
+  "version": "0.1.0",
+  "description": "四则运算计算器——Emerald 可分发 App 的参照示例",
+  "authors": ["Emerald"],
+  "min_runtime": { "emerald": ">=0.1.0" },
+  "permissions": [],
+  "entry": "src/main.rb",
+  "contributes": {
+    "commands": [{ "id": "calculator.open", "title": "打开计算器" }],
+    "menus": [{ "path": "应用/工具", "command": "calculator.open" }]
+  },
+  "activation": { "on_command": ["calculator.open"] },
+  "window": {
+    "singleton": true,
+    "default_geometry": { "x": 220, "y": 140, "w": 280, "h": 420 }
+  }
+}

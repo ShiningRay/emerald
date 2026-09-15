@@ -1,0 +1,7 @@
+.bundle/
+pkg/
+*.gem
+build/
+.DS_Store
+Gemfile.lock
+examples/*.js

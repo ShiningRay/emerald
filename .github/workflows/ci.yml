@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.1", "3.2", "3.3", "3.4"]
+    env:
+      CITRINE_PATH: ${{ github.workspace }}/citrine
+      BERYL_PATH: ${{ github.workspace }}/beryl
+    steps:
+      - uses: actions/checkout@v7
+      - name: 检出 citrine 内核（path 依赖）
+        uses: actions/checkout@v7
+        with:
+          repository: ShiningRay/citrine
+          path: citrine
+      - name: 检出 beryl 组件库（path 依赖）
+        uses: actions/checkout@v7
+        with:
+          repository: ShiningRay/beryl
+          path: beryl
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: 单元测试（CRuby）
+        run: bundle exec rake test
+
+  compile:
+    name: Opal 编译验收
+    runs-on: ubuntu-latest
+    env:
+      CITRINE_PATH: ${{ github.workspace }}/citrine
+      BERYL_PATH: ${{ github.workspace }}/beryl
+    steps:
+      - uses: actions/checkout@v7
+      - name: 检出 citrine 内核（path 依赖）
+        uses: actions/checkout@v7
+        with:
+          repository: ShiningRay/citrine
+          path: citrine
+      - name: 检出 beryl 组件库（path 依赖）
+        uses: actions/checkout@v7
+        with:
+          repository: ShiningRay/beryl
+          path: beryl
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - name: 整机示例 Opal 编译
+        run: bundle exec rake compile
