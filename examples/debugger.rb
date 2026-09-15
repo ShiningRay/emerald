@@ -74,12 +74,26 @@ class DebugPanel < Citrine::Component
     if tree_fp != @tree_fp
       @tree_fp = tree_fp
       self.tree_lines = lines
+      rebuild_dom_index
     end
     Beryl::Timer.after(400) { poll }
   end
 
   def bump_demo
     self.demo += 1
+  end
+
+  # ── 悬浮高亮（数据属性驱动，JS 事件委托在文件底部绑定一次）────────
+  # kind: node/component → 直接索引到 DOM 元素；
+  #       signal/flush   → 找到订阅者 effect 挂在哪些节点上，高亮那些节点。
+  def show_highlight(kind, ids)
+    targets = highlight_targets(kind, ids)
+    hide_highlight
+    targets.each { |dom| draw_highlight_box(dom, kind, ids) }
+  end
+
+  def hide_highlight
+    %x{ document.querySelectorAll('.dbg-hl').forEach(function (n) { n.remove(); }); }
   end
 
   def view
@@ -96,26 +110,42 @@ class DebugPanel < Citrine::Component
       if events.empty?
         label(css_class: "dbg-dim") { "（暂无事件）" }
       else
-        events.each { |e| label(css_class: "dbg-row") { fmt_event(e) } }
+        events.each do |e|
+          label(css_class: "dbg-row", data_hl_kind: "component",
+                data_hl_ids: e[:component_id].to_s) { fmt_event(e) }
+        end
       end
 
       label(css_class: "dbg-head") { "flush 轨迹 · 最近 #{flushes.size}" }
       if flushes.empty?
         label(css_class: "dbg-dim") { "（暂无 flush）" }
       else
-        flushes.each { |f| label(css_class: "dbg-row") { fmt_flush(f) } }
+        flushes.each do |f|
+          props = { css_class: "dbg-row" }
+          triggers = (f[:trigger_signal_ids] || [])
+          if triggers.any?
+            props[:data_hl_kind] = "signal"
+            props[:data_hl_ids] = triggers.join(",")
+          end
+          label(**props) { fmt_flush(f) }
+        end
       end
 
       label(css_class: "dbg-head") { "信号写入 · 最近 #{writes.size}" }
       if writes.empty?
         label(css_class: "dbg-dim") { "（暂无写入）" }
       else
-        writes.each { |w| label(css_class: "dbg-row") { fmt_write(w) } }
+        writes.each do |w|
+          label(css_class: "dbg-row", data_hl_kind: "signal",
+                data_hl_ids: w[:signal_id].to_s) { fmt_write(w) }
+        end
       end
 
       kind = tree_kind == :elements ? "元素树（无组件边界，降级）" : "组件树"
       label(css_class: "dbg-head") { "#{kind} · #{tree_lines.size} 行（截断）" }
-      tree_lines.each { |l| label(css_class: "dbg-row") { l } }
+      tree_lines.each do |line, nid|
+        label(css_class: "dbg-row", data_hl_kind: "node", data_hl_ids: nid.to_s) { line }
+      end
     end
   end
 
@@ -157,6 +187,87 @@ class DebugPanel < Citrine::Component
     @own_signal_ids ||= %i[writes flushes events tree_lines tree_kind demo].map { |name| signal(name).object_id }
   end
 
+  # object_id → DOM 元素索引（每次 poll 随树快照重建一次，75 节点量级）
+  def dom_index
+    @dom_index ||= {}
+  end
+
+  def rebuild_dom_index
+    index = {}
+    stack = [DBG_ROOT]
+    until stack.empty?
+      node = stack.pop
+      next if node.nil?
+
+      dom = (node.dom rescue nil)
+      index[node.object_id] = dom if dom
+      comp = node.rendered_component
+      index[comp.object_id] = dom if comp && dom
+      owner = node.owner
+      index[owner.object_id] = dom if owner.is_a?(Citrine::Component) && dom
+      stack.concat(node.children)
+    end
+    @dom_index = index
+  end
+
+  def highlight_targets(kind, ids)
+    case kind
+    when "node", "component"
+      ids.map { |id| dom_index[id] }.compact
+    when "signal", "flush"
+      subs = ids.map { |id| Citrine::Signal.all.find { |s| s.object_id == id } }
+                  .compact.flat_map { |s| s.instance_variable_get(:@subs) || [] }
+      return [] if subs.empty?
+
+      nodes_with_effects(subs)
+    else
+      []
+    end
+  end
+
+  # 深度优先 walk：节点自带的 owned_effects / props_effect / block_effect
+  # 与目标 effect 集有交集 → 该节点的 DOM 就是"这个 effect 画出来的东西"
+  def nodes_with_effects(targets)
+    found = []
+    stack = [DBG_ROOT]
+    until stack.empty?
+      node = stack.pop
+      next if node.nil?
+
+      owned = [node.props_effect, node.block_effect, *(node.owned_effects || [])].compact
+      dom = (node.dom rescue nil)
+      found << dom if dom && owned.any? { |e| targets.include?(e) }
+      stack.concat(node.children)
+    end
+    found
+  end
+
+  def draw_highlight_box(dom, kind, ids)
+    dom_n = dom.to_n
+    %x{
+      var el = #{dom_n};
+      if (el && el.getBoundingClientRect) {
+        var r = el.getBoundingClientRect();
+        if (r.width > 0 || r.height > 0) {
+          var box = document.createElement('div');
+          box.className = 'dbg-hl';
+          box.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;'
+            + 'left:' + (r.left - 2) + 'px;top:' + (r.top - 2) + 'px;'
+            + 'width:' + (r.width + 4) + 'px;height:' + (r.height + 4) + 'px;'
+            + 'border:2px solid #4f8cff;border-radius:4px;background:#4f8cff22;'
+            + 'box-shadow:0 0 0 1px #0b0e14,0 0 12px #4f8cff88;';
+          var tag = document.createElement('div');
+          tag.textContent = #{kind} + ' #' + #{ids.join(",")};
+          tag.style.cssText = 'position:absolute;top:-18px;left:-2px;background:#4f8cff;'
+            + 'color:#fff;font:10px/16px ui-monospace,Menlo,monospace;'
+            + 'padding:0 5px;border-radius:3px;white-space:nowrap;';
+          box.appendChild(tag);
+          document.body.appendChild(box);
+        }
+      }
+    }
+  end
+
   # 树形缩进：制表符连线（非空白字符，不依赖 white-space:pre 也不会被折叠）
   def tree_indent(depth)
     return "" if depth.zero?
@@ -164,12 +275,12 @@ class DebugPanel < Citrine::Component
     "│   " * (depth - 1) + "├── "
   end
 
-  # 组件树条目（有组件边界时）：一个组件一行
+  # 组件树条目（有组件边界时）：一个组件一行；pair = [显示行, node_id]
   def build_tree_lines(node, depth, out)
     return if node.nil? || out.size >= 80 || depth > 6
 
     key = node[:reuse_key] ? " key=#{node[:reuse_key]}" : ""
-    out << "#{tree_indent(depth)}#{node[:component]} ##{short_id(node[:node_id])}#{key}"
+    out << ["#{tree_indent(depth)}#{node[:component]} ##{short_id(node[:node_id])}#{key}", node[:node_id]]
     (node[:children] || []).each { |c| build_tree_lines(c, depth + 1, out) }
   end
 
@@ -181,7 +292,7 @@ class DebugPanel < Citrine::Component
     tag = comp ? (comp.class.name || comp.class.to_s) : node.type.to_s
     mark = comp ? "▸" : "·"
     key = node.reuse_key ? " key=#{node.reuse_key}" : ""
-    out << "#{tree_indent(depth)}#{mark} #{tag} ##{short_id(node.object_id)}#{key}"
+    out << ["#{tree_indent(depth)}#{mark} #{tag} ##{short_id(node.object_id)}#{key}", node.object_id]
     node.children.each { |c| build_outline(c, depth + 1, out) }
   end
 end
@@ -190,6 +301,35 @@ panel = DebugPanel.new
 Beryl::Renderer.mount_at('devtools', panel)
 # 轮询由外部一次性点火，之后 poll 自链（Beryl::Timer 是 setTimeout 一次性语义）
 Beryl::Timer.after(300) { panel.poll }
+
+# 悬浮高亮：#devtools 上事件委托一次绑定（行每 400ms 重建，委托不受影响）。
+# 行内标签带 data-hl-kind / data-hl-ids（透传属性），hover 时经 Ruby 侧
+# 找到对应 DOM 画描边 overlay；signal/flush 高亮其订阅 effect 渲染的节点。
+if defined?(Opal)
+  %x{
+    window.__hlShow = #{panel.method(:show_highlight).to_proc.to_n};
+    window.__hlHide = #{panel.method(:hide_highlight).to_proc.to_n};
+    (function () {
+      var dev = document.getElementById('devtools');
+      if (!dev || dev.__hlBound) return;
+      dev.__hlBound = true;
+      dev.addEventListener('mouseover', function (ev) {
+        var t = ev.target && ev.target.closest ? ev.target.closest('[data-hl-kind]') : null;
+        if (!t || t === dev.__hlCurrent) return;
+        dev.__hlCurrent = t;
+        var ids = (t.getAttribute('data-hl-ids') || '').split(',').filter(Boolean).map(Number);
+        window.__hlShow(t.getAttribute('data-hl-kind'), ids);
+      });
+      dev.addEventListener('mouseout', function (ev) {
+        var t = ev.target && ev.target.closest ? ev.target.closest('[data-hl-kind]') : null;
+        if (!t) return;
+        if (ev.relatedTarget && t.contains(ev.relatedTarget)) return;
+        dev.__hlCurrent = null;
+        window.__hlHide();
+      });
+    })();
+  }
+end
 
 # e2e 验收钩子（M2-4）：?demo=1 时自动对桌面图标派发一次合成点击——
 # 走完 event → batch → flush → signal_write 全链路（headless 浏览器无法真人点击）
