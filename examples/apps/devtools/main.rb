@@ -235,12 +235,19 @@ class DevToolsApp < Emerald::App
       "  h=#{e[:handler_name]}  →flush[#{flushes}]"
   end
 
+  # 树形缩进：制表符连线（非空白字符，不依赖 white-space:pre 也不会被 HTML 折叠）
+  def tree_indent(depth)
+    return '' if depth.zero?
+
+    ('│   ' * (depth - 1)) + '├── '
+  end
+
   # 组件树条目（有组件边界时）：一个组件一行
   def build_tree_lines(node, depth, out)
     return if node.nil? || out.size >= 80 || depth > 6
 
     key = node[:reuse_key] ? " key=#{node[:reuse_key]}" : ''
-    out << "#{'· ' * depth}#{node[:component]} ##{short_id(node[:node_id])}#{key}"
+    out << "#{tree_indent(depth)}#{node[:component]} ##{short_id(node[:node_id])}#{key}"
     (node[:children] || []).each { |c| build_tree_lines(c, depth + 1, out) }
   end
 
@@ -252,7 +259,7 @@ class DevToolsApp < Emerald::App
     tag = comp ? (comp.class.name || comp.class.to_s) : node.type.to_s
     mark = comp ? '▸' : '·'
     key = node.reuse_key ? " key=#{node.reuse_key}" : ''
-    out << "#{'  ' * depth}#{mark} #{tag} ##{short_id(node.object_id)}#{key}"
+    out << "#{tree_indent(depth)}#{mark} #{tag} ##{short_id(node.object_id)}#{key}"
     node.children.each { |c| build_outline(c, depth + 1, out) }
   end
 end
