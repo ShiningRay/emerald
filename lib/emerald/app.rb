@@ -47,6 +47,15 @@ module Emerald
       def default_geometry(&blk)
         blk ? manifest[:geometry] = blk : manifest[:geometry]
       end
+
+      # 窗口外观透传：wm.frame 的 opts（shape / resizable / maximizable / snap /
+      # css_class 等，见 beryl WindowManager#frame 与 WindowFrame prop 表）。
+      # 多次调用 merge 累积；shell 渲染窗口时展开（content/on_close 由 shell 接管，
+      # 应用不应在此声明）。
+      def window_opts(hash = nil)
+        hash.nil? ? (manifest[:window_opts] || {})
+                  : manifest[:window_opts] = (manifest[:window_opts] || {}).merge(hash)
+      end
     end
 
     attr_reader :ctx, :win_id

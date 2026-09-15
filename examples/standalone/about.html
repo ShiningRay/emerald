@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Emerald · Standalone</title>
+<style>
+  /* :root token 表与 lib/emerald/theme.rb 的 dark 调色板 + comfortable 密度
+     一一对应（Theme.apply 在运行期会重写这些变量做主题切换）——
+     约定与 desktop.html 一致 */
+  :root { --bg: #0b0e14; --panel: #11151f; --panel2: #151b28; --line: #232b3b;
+          --fg: #c9d4e6; --dim: #7d8aa5; --accent: #4f8cff;
+          --pad: 10px; --radius: 10px; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.45 -apple-system, "PingFang SC", sans-serif; }
+  #app { height: 100vh; }
+  button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 6px; padding: 4px 12px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--accent); }
+  p { margin: 0; }
+
+  /* 细滚动条（WebKit/Blink 走伪元素，Firefox 走 scrollbar-*） */
+  * { scrollbar-width: thin; scrollbar-color: #2a3348 transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a3348; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4660; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
+  /* 几何回写以 offsetWidth/Height 为准（含边框），必须 border-box，否则
+     拖拽/点击回写会让面板「呼吸」变大（beryl 踩坑，desktop.html 同款） */
+  *, *::before, *::after { box-sizing: border-box; }
+
+  /* ── 关于应用（与 desktop.html 同款类名）──────────────── */
+  .about-title { font-size: 20px; font-weight: 700; }
+  .about-version { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .about-kernel { color: var(--dim); line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="about.js"></script>
+</body>
+</html>

@@ -62,6 +62,9 @@ emerald/
   lib/emerald.rb               入口（Opal 守卫加载存储适配层）
   lib/emerald/shell.rb         DesktopShell + 桌面图标网格 + 托盘
   lib/emerald/app.rb           App 基类 + AppRegistry + manifest 宏
+  lib/emerald/runtime.rb       服务运行时（桌面无关服务构造，shell/Standalone 共用；
+                               ServiceHub 正式化第一步，PLAN §3.9）
+  lib/emerald/standalone.rb    独立宿主（应用脱离桌面外壳运行，自带 Runtime + Toast 堆叠）
   lib/emerald/vfs.rb           虚拟文件系统（纯 CRuby）+ 路径工具
   lib/emerald/storage.rb       持久化适配协议 + localStorage 后端（仅 Opal）
   lib/emerald/settings.rb      SettingsStore（schema 版本化）
@@ -70,8 +73,11 @@ emerald/
   lib/emerald/clipboard.rb     系统剪贴板（DragBus 同文档 + navigator.clipboard）
   lib/emerald/router.rb        FileTypeRouter（扩展名/mime → app）
   lib/emerald/apps/            内置应用（about/files/editor/settings/terminal）
+  emerald.gemspec              发布名 citrine-emerald（rubygems 的 emerald 名必被占，
+                               对齐 citrine-beryl 先例），Gemfile 走 gemspec + path 依赖
   examples/desktop.rb          演示入口（= 整机）
   examples/desktop.html        页面壳（box-sizing: border-box 必备，beryl 踩坑）
+  examples/standalone/         独立宿主示例（about.rb + about.html，rake standalone 编译）
   test/                        minitest（按子系统分文件）
   docs/PLAN.md                 本文档
 ```
@@ -425,3 +431,11 @@ Zlib/Digest/pack('C*')）：
 
 系统 ruby 2.6 无 bundler 2.7.2——所有命令先 `export PATH="$HOME/.rbenv/shims:$PATH"`
 （rbenv ruby 3.3.5）。CI 走 ruby/setup-ruby 无此坑。
+
+
+### 独立宿主与首个第三方应用（2026-09-15 追加）
+
+| # | 记录 |
+|---|---|
+| R16 | **Runtime/Standalone 独立宿主落地**：`Emerald::Runtime`（服务运行时：storage→settings→vfs→notify/clipboard/router + `boot_app`，DesktopShell 改为基于它组装、行为零变化）+ `Emerald::Standalone`（独立宿主组件：满视口 + 应用视图 + Toast 堆叠，`.boot` 收类或实例）。**Emerald App 由此可在不启动桌面的情况下直接运行**——`Beryl::Renderer.mount_at('app', Emerald::Standalone.boot(SomeApp))` 即整机。`emerald.gemspec`（citrine-emerald 0.1.0）使 emerald 可被第三方仓 path 依赖 |
+| R17 | **首个第三方应用 emerald-calc（科学计算器，独立仓）**：`Rational` 精确求值表达式引擎（deg/rad 三角、^、%、sqrt/ln/log/abs、π/e、50 条历史、中文错误模型）+ beryl 视图（2nd 功能切换/历史召回），55 项测试全绿；`bin/citrine package calculator ../emerald-calc/examples -I … -n EmeraldCalc` 产出独立 **EmeraldCalc.app 并启动验证通过**（不启桌面）；dev server 冒烟 200。计算器不读 ctx 任何服务——独立性的直接证明。engine 词法层十进制字面量转 Rational（`0.1+0.2=0.3` 精确）；无理运算按语义吸附（三角 1e-9 有理网格、开方完全平方回整、对数吸附最近整数） |

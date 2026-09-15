@@ -39,6 +39,20 @@
   .wclass { color: var(--dim); font-size: 11px; }
   .panel-body { flex: 1; overflow: auto; padding: 8px; }
 
+  /* ── 便利贴（异形窗口演示）────────────────────────────
+     shape 由 WindowFrame 内联（clip-path 折角 + 包裹层 drop-shadow）；
+     这里管"皮"：黄纸、胶带式标题栏、折角三角、微倾斜 */
+  .panel-wrap.sticky-note-win { transform: rotate(-1.2deg); }
+  .sticky-note-win .panel { background: #fef08a; border: none; border-radius: 3px; box-shadow: none; }
+  .sticky-note-win .panel.is-active { border: none; }
+  .sticky-note-win .panel-head { background: rgba(255, 255, 255, .45); border-bottom: none; padding: 4px 8px; }
+  .sticky-note-win .panel-body { padding: 6px 10px 2px; overflow: hidden; }
+  /* 折角：包裹层（不被 clip-path 裁剪）上的三角，斜边对整齐裁切口 */
+  .panel-wrap.sticky-note-win::after { content: ''; position: absolute; right: 0; bottom: 0; width: 26px; height: 26px; background: #d4a017; clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+  .sticky-note { flex: 1; }
+  .sticky-note-area { flex: 1; width: 100%; background: transparent; border: none; outline: none; resize: none; font: 14px/1.6 sans-serif; color: #3f3f46; }
+  .sticky-note-status { font-size: 11px; color: #92700a; padding: 0 4px 4px; }
+
   /* 八向缩放手柄 */
   .rs-handle { position: absolute; z-index: 10; }
   .rs-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }

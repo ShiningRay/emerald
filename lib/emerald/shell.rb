@@ -19,10 +19,8 @@ module Emerald
     CLOCK_INTERVAL_MS = 30_000
     # 桌面图标来源目录（VFS seed 保证存在）
     DESKTOP_DIR = '/Desktop'
-    # 设置项默认值（docs/PLAN.md §3.4；wallpaper 预设留待 Settings 应用消费）
-    DEFAULT_SETTINGS = {
-      theme: :dark, accent: '#4f8cff', wallpaper: :aurora, density: :comfortable
-    }.freeze
+    # 设置项默认值已上提至 Emerald::Runtime::DEFAULT_SETTINGS（独立宿主与
+    # 桌面宿主共用同一张默认表），此处不再重复声明。
 
     # shell 自身交互态全部受控 signal（beryl F4）：
     # 菜单栏开合索引 / 图标选择集 / 托盘时钟文本
@@ -46,26 +44,25 @@ module Emerald
     attr_reader :registry, :wm, :vfs, :settings, :notify, :services, :clipboard,
                 :router, :commands, :hub, :installer, :apphost
 
-    # 启动序列（渲染器外 = F6 安全区）：服务构建 → 注册表/窗口管理器 →
-    # 内置应用注册 → 预装包 seed → /Applications 扫描注册 → 贡献点接线 →
-    # 全局快捷键 → 首渲染前应用主题（防闪变）。
+    # 启动序列（渲染器外 = F6 安全区）：与桌面无关的服务构造交给
+    # Emerald::Runtime（独立宿主同源，行为零分叉）——shell 只补桌面侧：
+    # 注册表/窗口管理器 → 注入 :launcher/:apps/:open_file → 内置应用注册 →
+    # 预装包 seed → /Applications 扫描注册 → 贡献点接线 → 全局快捷键 →
+    # 首渲染前应用主题（防闪变；Runtime 构造时已应用一次，此处按原序列收口）。
     def initialize
       super()
-      storage = defined?(Opal) ? Emerald::Storage::LocalStorage.new : Emerald::Storage::Memory.new
-      @settings = Emerald::SettingsStore.new(storage: storage, defaults: DEFAULT_SETTINGS)
-      @settings.load
-      @vfs = Emerald::VFS.new(storage: storage)
-      @notify = Emerald::NotificationCenter.new(limit: 5)
-      @clipboard = Emerald::Clipboard.new
+      rt = Emerald::Runtime.new
+      @settings = rt.settings
+      @vfs = rt.vfs
+      @notify = rt.notify
+      @clipboard = rt.clipboard
+      @router = rt.router
       @commands = Emerald::CommandRegistry.new
       @hub = Emerald::ServiceHub.new
-      @router = build_router
       @installer = Emerald::Pkg::Installer.new(vfs: @vfs)
       @apphost = Emerald::Pkg::AppHost.new(vfs: @vfs, lock: @installer.lock,
                                            compiler: pkg_compiler, loader: pkg_loader)
-      @services = { vfs: @vfs, settings: @settings, notify: @notify,
-                    clipboard: @clipboard, router: @router,
-                    commands: @commands, hub: @hub, installer: @installer }
+      @services = rt.services.merge(commands: @commands, hub: @hub, installer: @installer)
       @wm = Beryl::WindowManager.new(viewport: current_viewport)
       @registry = Emerald::AppRegistry.new(services: @services)
       @registry.wm = @wm
@@ -81,19 +78,10 @@ module Emerald
       @hub.activate_startup(@services)
       register_global_hotkeys
       Emerald::Pkg::OpalParser.preload if defined?(Opal)
-      Emerald::Theme.apply(@settings.peek(:theme), accent: @settings.peek(:accent),
-                           density: @settings.peek(:density))
+      rt.apply_theme
     end
 
     # ── 启动序列的分步 ────────────────────────────────────
-
-    # 文件类型路由：.txt/.md/.rb → 编辑器（FileTypeRouter 纯服务，见 router.rb）；
-    # .emz 的安装路由在 open_file_with 里特判（Installer 不是窗口应用）
-    def build_router
-      Emerald::FileTypeRouter.new.tap do |router|
-        %w[.txt .md .rb].each { |ext| router.register(ext, :editor) }
-      end
-    end
 
     # ── 预装 / 扫描 / 贡献点（E7 · PLAN §3.10）────────────
 
@@ -398,7 +386,7 @@ module Emerald
       @registry.each_running do |inst|
         next unless wins.include?(inst.win_id)
 
-        @wm.frame(inst.win_id, content: -> { inst.view },
+        @wm.frame(inst.win_id, **inst.class.window_opts, content: -> { inst.view },
                   on_close: -> { close_window(inst.win_id) }).view
       end
       nil
