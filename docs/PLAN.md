@@ -285,6 +285,7 @@ Extension Host + API 面 + 惰性激活），App 拆成两半：
 | 吸附实时预览 | —（beryl M-WM+） | beryl WindowManager | 桌面 dogfood 痛点确认后 |
 | 桌面图标网格 | shell.rb | 评估留应用层（桌面语义重，暂不上提） | — |
 | Timer 防抖模式 | settings/vfs 复用 | 已在 beryl | — |
+| 异形窗口（WindowFrame `shape:` + frame `snap:` 开关） | —（窗口层能力，直接落 beryl，同 M5 直落路径） | 已在 beryl（便利贴示例包为首个消费者） | — |
 | `render(key:)` 插槽 block | — | citrine S3 待办 | 窗口 live 拖拽跟随彻底修复依赖它 |
 
 ## 6. 里程碑与验收

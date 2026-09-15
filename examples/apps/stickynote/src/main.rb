@@ -50,6 +50,7 @@ class StickyNote < Emerald::App
     vfs.write(target, buf)
     @path = target
     @snapshot = buf
+    self.dirty = false            # Effect 只在 buf 变化时重跑，保存须显式复位
     ctx[:notify]&.push('便利贴已保存', kind: :success)
   end
 
