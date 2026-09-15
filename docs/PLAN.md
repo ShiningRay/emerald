@@ -6,11 +6,13 @@
 > 设置/主题、通知、快捷键、启动器与一组内置应用。citrine ≈ 内核，beryl ≈ 组件库 +
 > 外壳原语，emerald ≈ 整机系统。Beryl 的第二个真实消费者（第一个是 RubyWorld）。
 >
-> 状态：**E0–E6 已落地（2026-09-15，emerald 244 项测试 + Opal 编译验收全绿，
-> citrine 286 项全绿）**——`emerald/build/Emerald.app` 已产出并启动验证通过；
-> 体积超 gzip 300KB 预算（64% 为 source map，方向见 §9 R7）。E7（可分发源码应用）
-> 设计已定稿（§3.9/3.10、D10–D12、两份 SPEC），未动工。实施中的定稿决策与遗留见 §9。
-> 本文档是唯一的规划事实源，变更须同步修订。
+> 状态：**E0–E7 已落地（2026-09-15，emerald 361 项测试 + Opal 编译验收全绿，
+> beryl 82 项、citrine 286 项全绿）**——E7（可分发源码应用）当日设计定稿并实施完毕：
+> .emz 包格式、Installer（zip/目录/git 来源）、/Applications 扫描 + 编译缓存、
+> CommandRegistry、Service 生命周期（deactivate 链）、About 降级为预装源码应用；
+> 浏览器端到端验收通过（安装 → 刷新持久 → 热更新 → 开窗渲染）。
+> 核心包 gzip 1.0MB、opal-parser 独立 chunk gzip 1.58MB（D12 懒加载，不占核心预算）。
+> 实施中的定稿决策与遗留见 §9。本文档是唯一的规划事实源，变更须同步修订。
 > 2026-09-15 修订：新增 3.9 / 3.10、D10–D12、E7——可分发源码应用（.emap）
 > 与 Service/View 双子架构（VS Code 插件模型）。
 > 2026-09-15 修订②：包格式与 Endpoint 协议升格为生态级标准文档
@@ -290,7 +292,7 @@ Extension Host + API 面 + 惰性激活），App 拆成两半：
 | **E4** 图标 + 设置 + 主题 | 桌面图标网格（选择/双击/拖拽换位持久化）+ Settings 应用 + 暗/亮主题 + 壁纸 | 前置 beryl M5 完成；浏览器：拖图标刷新后位置保持；主题切换无闪变 | 2–3d | ◐ 部分：图标网格（固定布局）/设置/主题切换已落地；**beryl M5 deferred**（token 自包含，R4）；图标拖拽换位 v1.1 |
 | **E5** 系统服务 | NotificationCenter + ShortcutRegistry（⌘S/⌘W）+ Clipboard + 跨应用拖拽（Files→Editor 落下即开）+ Terminal（VFS shell） | 单测：hotkey chord 解析/scope 路由；浏览器：拖文件到编辑器窗口打开；终端 ls/cat 真实读写 VFS | 2–3d | ◐ 部分：通知/快捷键/剪贴板/终端已落地（⌘W、⌘1-9 已接线）；跨应用文件拖拽 v1.1（依赖 citrine render(key:) 插槽） |
 | **E6** 打包与打磨 | citrine packager → Emerald.app + 体积审计 + 启动性能 + 文档 + 反哺 beryl 首批 | .app 双击可用；gzip 体积对照预算；beryl 收到 hotkey 上提 PR | 1–2d | ✅ 落地（packager 增 `-I`/目录/`-n` 支持，citrine 286 项绿；`build/Emerald.app` 启动验证通过；体积超预算见 R7） |
-| **E7** 可分发应用 | .emz 包格式（SPEC-package-format）+ Installer（本地包/目录 + git 导入）+ installed.json lock + /Applications 扫描注册 + 编译缓存 + CommandRegistry + Service/View 重构 + About 降级为预装源码应用 | 单测：manifest 校验 / git 来源解析与 lock 固化 / 缓存失效 / 激活事件 / 命令注册；浏览器：双击 .emz 与 git URL 导入均 → 启动器出现 → 开窗口 → 刷新仍在；Editor 改源码保存 → 重编生效 | 2–3d | ☐ 设计定稿（§3.9/3.10、D10–D12、两份 SPEC），未动工 |
+| **E7** 可分发应用 | .emz 包格式（SPEC-package-format）+ Installer（本地包/目录 + git 导入）+ installed.json lock + /Applications 扫描注册 + 编译缓存 + CommandRegistry + Service/View 重构 + About 降级为预装源码应用 | 单测：manifest 校验 / git 来源解析与 lock 固化 / 缓存失效 / 激活事件 / 命令注册；浏览器：双击 .emz 与 git URL 导入均 → 启动器出现 → 开窗口 → 刷新仍在；Editor 改源码保存 → 重编生效 | 2–3d | ✅ 落地（2026-09-15 当日实施：pkg 管线 8 文件 + CommandRegistry/ServiceHub + AppHost + shell 接线；单测 361 项绿；浏览器实测 .emz 安装/双击路由/刷新持久/热更新/卸载全通。偏差与遗留见 §9 R8–R14） |
 
 关键路径：E0 → E1 → E2 → E3（VFS 是最长单项）→ E4（等 beryl M5，可并行）→ E5 → E6 →
 E7（依赖 E3 的 VFS 与 E5 的 FileTypeRouter/通知）。
@@ -328,10 +330,12 @@ E7（依赖 E3 的 VFS 与 E5 的 FileTypeRouter/通知）。
 | 编译缓存与 Opal 版本漂移 | 缓存键含 Opal 版本；manifest `min_emerald`；失败报"应用需更新" |
 
 
-## 9. 实施记录（2026-09-15，E0–E6 落地当日）
+## 9. 实施记录（2026-09-15，E0–E7 落地当日）
 
 实施方式：E0 骨架 → 两波并行子任务（系统服务层 → 外壳与内置应用）→
-集成修正 → E6 打包。测试现状：**emerald 244 项**（721 断言）、**beryl 81 项**、
+集成修正 → E6 打包 → E7 可分发应用（pkg 管线 → 安装器/扫描 → 命令与
+Service 生命周期 → 预装降级 → 外壳接线 → 浏览器端到端验收）。
+测试现状：**emerald 361 项**（1072 断言）、**beryl 82 项**、
 **citrine 286 项**，全部 0 失败；emerald 侧 Opal 编译验收与 dev server 冒烟通过。
 
 ### 实施中对本文档的定稿修正
@@ -343,17 +347,69 @@ E7（依赖 E3 的 VFS 与 E5 的 FileTypeRouter/通知）。
 | R3 | **services 键定稿**：`:vfs :settings :notify :clipboard :router :launcher :apps :open_file`；`:launcher` 与 `:apps` 是同一 AppRegistry 的两个别名（前者「启动」语义，后者「应用列表」语义）；`:open_file` 是 lambda——router 命中 → `launcher.launch(app, path:)`，未命中 → 通知 warning |
 | R4 | **beryl M5 deferred**（D7 的例外）：主题 token 自包含于 `theme.rb` + `desktop.html`，不动 beryl 仓；M5 完成时 emerald 切换为消费方（§3.8） |
 | R5 | **beryl 上游修复**：`WindowManager#each_window` 空表时块返回值 `[]` 被渲染层 tos 成可见 `"[]"` 文本——已修（显式 `nil`）并在 beryl `window_test.rb` 加回归测试 `test_taskbar_empty_renders_no_brackets` |
+| R6 | **ctx 与 argv 分离不变；storage E7 前置修复**：`LocalStorage#load` 返回的裸 JS 对象（JSON.parse 产物）无任何 Ruby 方法，浏览器带数据重载在 VFS/Settings 的 `is_a?(Hash)` 处 TypeError——新增 `Emerald::Storage.from_native`（对象→Hash、数组原生直通、null→nil）并接入 load |
+| R7 | **体积审计（E6）维持**：核心 `desktop.js` 3.94MB / gzip 1.01MB（E7 pkg 管线入 bundle 增加约 0.1MB）；opal-parser 独立 chunk `desktop-parser.js` gzip 1.58MB（`rake parser_chunk` 产出，D12 懒加载，不占核心预算） |
+
+### E7 实施记录（2026-09-15）
+
+**落地子系统**（均为纯 CRuby 可测 + Opal 同构，字节底座自研——opal 1.8.3 无
+Zlib/Digest/pack('C*')）：
+
+- `lib/emerald/pkg/`：`json`（双端 JSON 适配）、`manifest`（schema 校验，§3/§4）、
+  `source`（安装来源语法 + GitHub/GitLab archive URL）、`bytes`（Array<Integer>
+  字节表示 + latin1/UTF-8 边界）、`sha256`（纯 Ruby，lock 指纹 + 缓存键）、
+  `inflate`（RFC 1951 解码器）、`zip`（只读 central directory，stored/deflate）、
+  `lock`（installed.json）、`installer`（三类来源 → /Applications + lock 固化、
+  内容指纹幂等、archive 顶层目录剥离、monorepo subpath）、`apphost`（扫描 +
+  编译缓存键 = 源码 sha256 + Opal 版本 + 子类捕获注册 + reload reopen 语义）、
+  `opal_parser`（D12 懒加载 chunk 适配，同步 XHR 兜底）。
+- `lib/emerald/commands.rb`：CommandRegistry（一次注册喂启动器/菜单/快捷键）。
+- `lib/emerald/service.rb`：Service（activation 宏）+ ServiceHub（on_command /
+  on_file_type / on_startup 幂等激活、deactivate_all）。
+- `lib/emerald/packages.rb`：About 预装包正本（源码文本形态随 bundle 分发），
+  桌面首次启动 seed 进 /Applications/about 并打 `bundled` 标记（类已随 bundle
+  定义，开机不求值——**内置应用 = 预装应用**落地）。
+- shell 接线：启动扫描 → 贡献点接线（contributes.commands → 命令 + 快捷键、
+  file_types → FileTypeRouter）→ `.emz` 打开路由 → `install_package_bytes` /
+  `install_git_url` / `uninstall_package` → Editor 保存钩子 `reload_source`
+  （/Applications 下源码保存 → 重编 + reopen 热更新）。
+- Editor `deactivate`：窗口关闭即 dispose dirty 追踪 Effect（多开多关不再累积）。
+- `rake parser_chunk`：独立编译 opal-parser chunk（核心 bundle 不 require）。
+
+**浏览器端到端验收**（dev server + 真实浏览器）：构造 .emz → `install_package_bytes`
+安装 → 启动器出现 → 开窗渲染；`/Desktop/demo.emz` 双击路由安装；刷新页面 →
+/Applications 与编译缓存命中 → 应用自动注册；改包源码保存 → 热更新生效（v2 视图）；
+卸载 → 目录/lock/命令清理。全部通过。
+
+**实施中对本文档的定稿修正（E7 增补）**：
+
+| # | 记录 |
+|---|---|
+| R8 | **contributes.commands v1 归约**：包声明的命令 v1 一律归约为「打开该应用」；命令体真正执行包内代码、菜单路径（contributes.menus）暂不消费（接线点已留） |
+| R9 | **resolved_commit 推导**：浏览器端 archive 不回传 sha；从 zip 顶层目录 `<repo>-<sha>` 形态推导，推不出时以 content_sha256 固化（SPEC §5 的等价实现） |
+| R10 | **浏览器端 git 导入受 GitHub CORS 限制**：codeload.github.com 的 ACAO 白名单不含任意源、api.github.com zipball 302 后仍受制于最终响应头——fetcher 注入点保留，浏览器侧需平台代理（Registry 站，v1.1+）；CLI/AgentOS 真实 clone 不受影响 |
+| R11 | **Opal x-string 表达式陷阱**：单行 backtick 在含前置 return 的方法里被编译为 `return <js>`（必须是合法 JS **表达式**）；多行 %x{} 语句化、作为表达式赋值时返回值被丢弃——统一口径：需要返回值处用 IIFE 或「先声明 Ruby 局部变量、%x 语句内赋值」（json.rb/storage.rb/bytes.rb） |
+| R12 | **boxed String eval 静默失败**：VFS 读出的字符串可能是 boxed JS String 对象，`(0, eval)` 对它不执行——`OpalParser.run_module` 入口强制 `String(js)` 原生化，并临时接管 `Opal.queue` 收集模块函数、同步调用（绕开 last_promise 微任务链，满足 evaluate! 同步可见契约） |
+| R13 | **shell 窗口层订阅缺失**（E1 遗留暴露）：mount 时无存活实例 → `each_window_frame` 循环体不执行 → `wm.windows` 信号未被读 → 之后 launch/close 均不触发重渲染——修复为无条件先读一次 windows 信号建立订阅 |
+| R14 | **beryl 上游修复②**：`MenuBar#toggle` 直接 `event[:clientX]`——`Citrine::Event` 无 `[]` 访问器，浏览器点菜单必炸（NoMethodError、静默无下拉）——改为 `event.raw[:clientX]` 并在 beryl `menu_test.rb` 加回归测试；R5 的 each_window 修复此前未实际落盘，本次补齐实现 + 回归测试 |
+| R15 | **包源码字符集限制**：浏览器内 opal-parser（JS parser）解析 astral 平面字符（如 🌐 U+1F310）报语法错，BMP（中文/常用符号）不受影响；内置应用走 CRuby native parser 无此限制——**包源码须避免 emoji 字面量**（About 图标 💎→◈），SPEC 待增补 |
 
 ### 已知遗留（v1.1+ 待办）
 
-- **App 无 dispose 钩子**：Editor 的 dirty 追踪 Effect 在窗口关闭后无清理通道，
-  多开多关缓慢累积——E7 Service/View 重构时随 `deactivate` 统一解决（§3.9）。
+- ~~**App 无 dispose 钩子**~~ **已解决（E7）**：`AppRegistry#dispose` 逐实例触发
+  `deactivate`，Editor 的 dirty 追踪 Effect 随窗口关闭清理；Service 生命周期
+  （activation 宏 + ServiceHub）就绪，内置应用向 Service/View 双子的完整迁移
+  （后台任务、Worker 化）列 v1.1+。
 - **beryl Tree 空 children tos `"[]"`**：beryl 既有行为（其 display_test 同样存在），
   留 beryl 侧修。
 - **v1.1 清单**：桌面图标拖拽换位/框选；窗口布局持久化（D8）；⌘Space 启动器、
   ⌘S 全局保存（现由 Editor 自管）；Terminal ↑ 历史 recall（Session#history 已备好）；
   跨应用文件拖拽（Files→Editor 落下即开，依赖 citrine `render(key:)` 插槽支持 S3）；
   通知中心托盘角标点击展开历史。
+- **E7 增补（v1.1+）**：包命令体真正执行包内代码（v1 归约为打开应用）+
+  contributes.menus 消费；浏览器端 git 导入的平台代理（GitHub CORS 限制，R10）；
+  OPFS 二进制资产（包内 assets/ 目前按 UTF-8 文本写 VFS）；多文件包
+  （require 虚拟 $LOAD_PATH）；SPEC 增补 astral 字符限制条款（R15）。
 - **textarea 的 StringRenderer 语义**：`value:` Signal 在 SSR 下渲染为 inspect 串
   （框架 dev-mode 警告明示），测试断信号本身，不断言 HTML 文本。
 

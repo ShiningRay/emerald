@@ -8,7 +8,7 @@ module Emerald
     class About < Emerald::App
       app_id    :about
       app_title '关于'
-      app_icon  '💎'
+      app_icon  '◈'
       singleton true
       default_geometry { { x: 200, y: 120, w: 380, h: 280 } }
 

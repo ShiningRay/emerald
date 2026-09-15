@@ -15,4 +15,9 @@ task :compile do
   sh "bundle exec opal -c -I. -I#{File.join(CITRINE, 'lib')} -I#{File.join(BERYL, 'lib')} -Ilib -o examples/desktop.js examples/desktop.rb"
 end
 
+desc 'opal-parser 独立 chunk（E7 · D12 懒加载：安装/编辑源码应用时按需加载）'
+task :parser_chunk do
+  sh "bundle exec opal -c -I. -I#{File.join(CITRINE, 'lib')} -I#{File.join(BERYL, 'lib')} -Ilib -o examples/desktop-parser.js lib/emerald/parser_chunk.rb"
+end
+
 task default: %i[test compile]

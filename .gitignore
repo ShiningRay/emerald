@@ -1,5 +1,5 @@
 .bundle/
-pkg/
+/pkg/
 *.gem
 build/
 .DS_Store

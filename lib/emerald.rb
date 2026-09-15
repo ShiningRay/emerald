@@ -5,6 +5,10 @@
 #
 # 纪律（与 beryl 同款）：系统服务与应用逻辑纯 CRuby 可测（beryl F5）；
 # Opal/JS 代码只允许出现在适配层（storage/theme 内部），且 defined?(Opal) 守卫。
+module Emerald
+  VERSION = '0.1.0'
+end
+
 require 'citrine'
 require 'beryl'
 require_relative 'emerald/storage'
@@ -15,6 +19,10 @@ require_relative 'emerald/notify'
 require_relative 'emerald/hotkey'
 require_relative 'emerald/clipboard'
 require_relative 'emerald/theme'
+require_relative 'emerald/pkg'
+require_relative 'emerald/packages'
+require_relative 'emerald/commands'
+require_relative 'emerald/service'
 require_relative 'emerald/app'
 require_relative 'emerald/apps/about'
 require_relative 'emerald/apps/files'

@@ -53,11 +53,29 @@ module Emerald
     # argv：launch(app_id, **argv) 注入的启动参数；写入口归 AppRegistry 内部使用
     attr_accessor :argv
 
+    # ── 子类追踪（E7 · AppHost 求值包 entry 后捕获新定义的应用类）──────
+    # 全部 Emerald::App 子类，插入序 = 定义序；citrine/beryl 均未定义
+    # inherited，此处挂接安全（仍调 super 保持可叠加）。
+    class << self
+      def app_subclasses
+        @app_subclasses ||= []
+      end
+
+      def inherited(subclass)
+        app_subclasses << subclass
+        super
+      end
+    end
+
     # 启动钩子：默认实现存服务表（ctx 即注册时注入的 services）。
     # 子类覆写须 super（或自行存 @ctx）。
     def boot(ctx)
       @ctx = ctx
     end
+
+    # 生命周期收尾（E7 §3.9）：实例注销（窗口关闭）时由 AppRegistry#dispose
+    # 调用——实例级资源（如 Editor 的 dirty 追踪 Effect）在此清理。默认 no-op。
+    def deactivate; end
 
     # view 由子类实现（基类 Citrine::Component#view 已 raise NotImplementedError）
   end
@@ -131,7 +149,9 @@ module Emerald
     end
 
     # 仅注销实例，返回被注销的实例（窗口归 wm/shell 管——关闭链路先 wm.close
-    # 再 dispose，见 PLAN §3.2）；未知 win_id 为 no-op（返回 nil）
+    # 再 dispose，见 PLAN §3.2）；未知 win_id 为 no-op（返回 nil）。
+    # 每个实例注销即触发其 deactivate（E7 §3.9：窗口关闭 = 实例生命周期终点，
+    # Editor 的 dirty Effect 等实例级资源在此清理，多开多关不再累积）。
     def dispose(win_id)
       assert_outside_effect!(:dispose)
       id = normalize_id(win_id)
@@ -139,6 +159,7 @@ module Emerald
       return nil unless inst
 
       @by_app[inst.class.app_id].delete(id)
+      inst.deactivate
       inst
     end
 

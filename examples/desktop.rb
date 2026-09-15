@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# backtick_javascript: true
 # Emerald OS 整机示例（浏览器）——演示页即整机（docs/PLAN.md §7）
 # 运行：在 citrine 仓库执行 bin/citrine dev ../emerald/examples -I ../beryl/lib -I ../emerald/lib
 # 编译（emerald/ 目录内）：bundle exec rake compile
@@ -12,3 +13,6 @@ shell = Emerald::DesktopShell.new
 # 落地后改由 /Applications 扫描自动完成
 shell.registry.register(Calculator)
 Beryl::Renderer.mount_at('app', shell)
+
+# 浏览器验收便利（E7）：console 里可经 window.EmeraldShell 调安装流
+`window.EmeraldShell = shell` if defined?(Opal)

@@ -43,10 +43,12 @@ module Emerald
     watch :reapply_theme
 
     # 公开读访问器：测试与将来应用取服务用
-    attr_reader :registry, :wm, :vfs, :settings, :notify, :services, :clipboard, :router
+    attr_reader :registry, :wm, :vfs, :settings, :notify, :services, :clipboard,
+                :router, :commands, :hub, :installer, :apphost
 
     # 启动序列（渲染器外 = F6 安全区）：服务构建 → 注册表/窗口管理器 →
-    # 内置应用注册 → 全局快捷键 → 首渲染前应用主题（防闪变）。
+    # 内置应用注册 → 预装包 seed → /Applications 扫描注册 → 贡献点接线 →
+    # 全局快捷键 → 首渲染前应用主题（防闪变）。
     def initialize
       super()
       storage = defined?(Opal) ? Emerald::Storage::LocalStorage.new : Emerald::Storage::Memory.new
@@ -55,27 +57,176 @@ module Emerald
       @vfs = Emerald::VFS.new(storage: storage)
       @notify = Emerald::NotificationCenter.new(limit: 5)
       @clipboard = Emerald::Clipboard.new
+      @commands = Emerald::CommandRegistry.new
+      @hub = Emerald::ServiceHub.new
       @router = build_router
+      @installer = Emerald::Pkg::Installer.new(vfs: @vfs)
+      @apphost = Emerald::Pkg::AppHost.new(vfs: @vfs, lock: @installer.lock,
+                                           compiler: pkg_compiler, loader: pkg_loader)
       @services = { vfs: @vfs, settings: @settings, notify: @notify,
-                    clipboard: @clipboard, router: @router }
+                    clipboard: @clipboard, router: @router,
+                    commands: @commands, hub: @hub, installer: @installer }
       @wm = Beryl::WindowManager.new(viewport: current_viewport)
       @registry = Emerald::AppRegistry.new(services: @services)
       @registry.wm = @wm
       @services[:launcher] = @registry
       @services[:apps] = @registry # 别名：设置应用等按「应用列表」语义读取
       @services[:open_file] = ->(path) { open_file_with(path) }
+      @services[:reload_source] = ->(path) { on_app_source_saved(path) }
       register_builtin_apps
+      seed_preinstalled_packages
+      scan_installed_apps
+      register_contributions
+      register_system_commands
+      @hub.activate_startup(@services)
       register_global_hotkeys
+      Emerald::Pkg::OpalParser.preload if defined?(Opal)
       Emerald::Theme.apply(@settings.peek(:theme), accent: @settings.peek(:accent),
                            density: @settings.peek(:density))
     end
 
     # ── 启动序列的分步 ────────────────────────────────────
 
-    # 文件类型路由：.txt/.md/.rb → 编辑器（FileTypeRouter 纯服务，见 router.rb）
+    # 文件类型路由：.txt/.md/.rb → 编辑器（FileTypeRouter 纯服务，见 router.rb）；
+    # .emz 的安装路由在 open_file_with 里特判（Installer 不是窗口应用）
     def build_router
       Emerald::FileTypeRouter.new.tap do |router|
         %w[.txt .md .rb].each { |ext| router.register(ext, :editor) }
+      end
+    end
+
+    # ── 预装 / 扫描 / 贡献点（E7 · PLAN §3.10）────────────
+
+    # 内置应用 = 预装应用：把包正本（源码）seed 进 /Applications（幂等，
+    # 用户编辑过的正本不覆盖）；类本身已随 bundle 定义（编译产物形态），
+    # lock 打 bundled 标记让 AppHost 扫描跳过求值（开机不加载 opal-parser，D12）
+    def seed_preinstalled_packages
+      Emerald::Packages.builtin.each do |id, files|
+        dir = "#{Emerald::Pkg::Installer::APPS_DIR}/#{id}"
+        next if @vfs.exist?("#{dir}/manifest.json")
+
+        @installer.install_dir(dir, files)
+        @installer.lock.mark_bundled(id)
+      end
+    rescue StandardError => e
+      @notify.push("预装应用初始化失败：#{e.message}", kind: :warning)
+    end
+
+    # 扫描 /Applications：源码应用经编译缓存求值后注册；失败项逐个通知，
+    # 不拖垮整机（PLAN §8：用户改坏 /Applications ≠ 系统崩）
+    def scan_installed_apps
+      @apphost.scan(@registry).each do |r|
+        @notify.push("应用 #{r[:id]} 装载失败：#{r[:message]}", kind: :warning) if r[:status] == :failed
+      end
+    end
+
+    # 包 manifest 贡献点接线（SPEC §4.1）：commands → CommandRegistry +
+    # 快捷键；file_types → FileTypeRouter。v1 所有命令都归约为「打开该应用」
+    # （命令体真正跑包内代码列 v1.1，见 PLAN 实施记录）。
+    def register_contributions
+      @installer.list.each do |entry|
+        next unless entry['kind'] == 'app'
+
+        id = entry['id']
+        manifest = begin
+          Emerald::Pkg::Manifest.parse(@vfs.read("#{Emerald::Pkg::Installer::APPS_DIR}/#{id}/manifest.json"))
+        rescue StandardError
+          next
+        end
+        manifest.commands.each do |cmd|
+          next if @commands.command?(cmd[:id])
+
+          app_id = id.to_sym
+          @commands.register(cmd[:id], title: cmd[:title], hotkey: cmd[:hotkey]) { launch_app(app_id) }
+          Emerald.hotkey.register(cmd[:hotkey]) { @commands.run(cmd[:id]) } if cmd[:hotkey]
+        end
+        manifest.file_types.each { |ext| @router.register(ext, id) }
+      end
+    end
+
+    # 系统级命令：每个注册应用一个 app.<id>（菜单/启动器/快捷键三处可达）
+    def register_system_commands
+      @registry.apps.each do |app|
+        cid = "app.#{app[:id]}"
+        next if @commands.command?(cid)
+
+        app_id = app[:id]
+        @commands.register(cid, title: "打开 #{app[:title]}") { launch_app(app_id) }
+      end
+    end
+
+    # 编译边界（浏览器 = opal-parser 懒加载 chunk；CRuby 测试为 nil——
+    # 仅 bundled 预装可装载，源码应用装载会在 AppHost 报 failed）
+    def pkg_compiler
+      return nil unless defined?(Opal)
+
+      ->(src, _id) { Emerald::Pkg::OpalParser.compile(src) }
+    end
+
+    def pkg_loader
+      return nil unless defined?(Opal)
+
+      ->(js) { Emerald::Pkg::OpalParser.run_module(js) }
+    end
+
+    # ── 包安装 / 卸载 / 热更新（事件回调专用入口）─────────
+
+    # 安装管线统一收尾：reload（注册或 reopen）→ 贡献点重接 → 通知
+    def install_and_register
+      result = yield
+      id = result[:manifest].id
+      report = @apphost.reload(@registry, id)
+      register_contributions
+      case result[:status]
+      when :installed then @notify.push("#{result[:manifest].name} 已安装", kind: :success)
+      when :updated   then @notify.push("#{result[:manifest].name} 已更新", kind: :success)
+      end
+      @notify.push("应用 #{id} 装载失败：#{report[:message]}", kind: :warning) if report[:status] == :failed
+      result
+    rescue StandardError => e
+      @notify.push("安装失败：#{e.message}", kind: :error)
+      nil
+    end
+
+    # 浏览器文件选择器（Settings 安装区）：bytes 为字节 Array<Integer>
+    def install_package_bytes(filename, bytes)
+      install_and_register { @installer.install_file(filename, bytes) }
+    end
+
+    # git URL 导入（浏览器走平台 archive HTTP；未支持平台报错走通知）
+    def install_git_url(url)
+      install_and_register { @installer.install_git(url) }
+    end
+
+    # Files 双击 .emz：VFS 里的包文件是 latin1 串形态（字符码 = 字节）
+    def install_vfs_emz(path)
+      bytes = Emerald::Pkg::Bytes.from_latin1(@vfs.read(path))
+      install_and_register { @installer.install_file(path, bytes) }
+    end
+
+    # 卸载：先关该应用全部窗口（复用关闭链路），再删包与 lock
+    def uninstall_package(id)
+      @registry.each_running.select { |i| i.class.app_id == id.to_sym }
+               .each { |i| close_window(i.win_id) }
+      ok = @installer.uninstall(id)
+      @commands.unregister("app.#{id}")
+      @notify.push(ok ? "已卸载 #{id}" : "未安装 #{id}", kind: ok ? :success : :warning)
+      ok
+    end
+
+    # Editor 保存钩子（services[:reload_source]）：改动 /Applications 下的
+    # 包源码 → 重编 + reopen 热更新该应用类
+    def on_app_source_saved(path)
+      return unless path.start_with?("#{Emerald::Pkg::Installer::APPS_DIR}/")
+
+      app_id = path.split('/')[2]
+      return if app_id.nil? || app_id.empty?
+
+      report = @apphost.reload(@registry, app_id)
+      if report[:status] == :failed
+        @notify.push("应用 #{app_id} 重载失败（保留上一版本）：#{report[:message]}", kind: :error)
+      else
+        @notify.push("应用 #{app_id} 已热更新", kind: :success)
       end
     end
 
@@ -120,9 +271,11 @@ module Emerald
       @registry.dispose(win_id)
     end
 
-    # 文件打开路由（services[:open_file] 的实体）：命中注册类型 → 启动对应
-    # 应用（argv 带 path）；未命中 → 警告通知（PLAN §3.6 FileTypeRouter 消费方）
+    # 文件打开路由（services[:open_file] 的实体）：.emz → 安装器；命中注册
+    # 类型 → 启动对应应用（argv 带 path）；未命中 → 警告通知
     def open_file_with(path)
+      return install_vfs_emz(path) if path.end_with?('.emz')
+
       app_id = @router.app_for(path)
       if app_id
         launch_app(app_id, path: path)
@@ -234,13 +387,21 @@ module Emerald
     # 窗口渲染循环（D3 插槽模式 + D4 条件渲染）：app 实例生命周期归 registry，
     # 渲染一律以 wm.windows 成员表为准——✕ 注销后无守卫的 frame 会 raise
     # 并把任务栏连带搞崩（beryl 踩坑 §8）
+    # 窗口渲染循环（D3 插槽模式 + D4 条件渲染）：app 实例生命周期归 registry，
+    # 渲染一律以 wm.windows 成员表为准——✕ 注销后无守卫的 frame 会 raise
+    # 并把任务栏连带搞崩（beryl 踩坑 §8）。
+    # 开头必须无条件读一次 windows 信号建立订阅：mount 时无存活实例的话，
+    # 循环体不会执行、信号未被读，之后 launch/close 都不会触发本块重渲染
+    #（E7 浏览器验收发现：窗口注册成功但 DOM 永不出现在启动后的首次渲染）。
     def each_window_frame
+      wins = @wm.windows
       @registry.each_running do |inst|
-        next unless @wm.windows.include?(inst.win_id)
+        next unless wins.include?(inst.win_id)
 
         @wm.frame(inst.win_id, content: -> { inst.view },
                   on_close: -> { close_window(inst.win_id) }).view
       end
+      nil
     end
 
     # 菜单栏（beryl F4 受控开合）：「应用」= 注册表启动器；「桌面」= 暗色主题

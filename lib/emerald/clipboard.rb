@@ -29,10 +29,11 @@ module Emerald
     # Opal 专用：writeText 返回 Promise，权限拒绝会 reject——显式 .catch 吃掉，
     # 守住「失败静默」契约；navigator.clipboard 缺失（非安全上下文）走 catch。
     # defined?(Opal) 守卫：CRuby 下纯内存 no-op（不执行反引号）。
+    # IIFE 包裹：方法含前置 return 时 x-string 处于表达式位置，必须是合法 JS 表达式。
     def write_system(text)
       return unless defined?(Opal)
 
-      `try { if (navigator.clipboard) { navigator.clipboard.writeText(#{text}).catch(function() {}) } } catch (e) {}`
+      `(function() { try { if (navigator.clipboard) { navigator.clipboard.writeText(#{text}).catch(function() {}) } } catch (e) {} })()`
     end
   end
 end

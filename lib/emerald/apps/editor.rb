@@ -38,6 +38,12 @@ module Emerald
         track_dirty
       end
 
+      # 实例注销（窗口关闭）：停掉 dirty 追踪 Effect（E7 deactivate 链）
+      def deactivate
+        @dirty_effect&.dispose
+        @dirty_effect = nil
+      end
+
       def view
         stack(css_class: 'em-editor', gap: 6) do
           header_row
@@ -63,6 +69,7 @@ module Emerald
         @snapshot = buf
         self.dirty = false
         ctx[:notify]&.push('已保存', kind: :success)
+        ctx[:reload_source]&.call(target) # E7：/Applications 包源码保存 → 热更新
       end
 
       def confirm_save_as(name)
@@ -91,7 +98,7 @@ module Emerald
       end
 
       def track_dirty
-        Citrine::Effect.create { self.dirty = (buf != @snapshot) }
+        @dirty_effect = Citrine::Effect.create { self.dirty = (buf != @snapshot) }
       end
 
       def header_row

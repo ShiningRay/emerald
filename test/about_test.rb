@@ -9,7 +9,7 @@ class AboutTest < Minitest::Test
   def test_manifest_macros
     assert_equal :about, Emerald::Apps::About.app_id
     assert_equal '关于', Emerald::Apps::About.app_title
-    assert_equal '💎', Emerald::Apps::About.app_icon
+    assert_equal '◈', Emerald::Apps::About.app_icon
     assert_equal true, Emerald::Apps::About.singleton
     assert_equal({ x: 200, y: 120, w: 380, h: 280 },
                  Emerald::Apps::About.default_geometry.call)
