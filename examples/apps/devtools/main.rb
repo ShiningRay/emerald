@@ -224,8 +224,8 @@ class DevToolsApp < Emerald::App
 
   def fmt_flush(f)
     triggers = (f[:trigger_signal_ids] || []).map { |id| short_id(id) }.join(',')
-    total = f[:effects].sum { |e| e[:duration_ms] }
-    fx = f[:effects].map { |e| "fx#{short_id(e[:effect_id])}×#{e[:runs]} #{e[:duration_ms]}ms" }.join(' ')
+    total = f[:effects].sum { |e| e[:duration_ms] }.round(2)
+    fx = f[:effects].map { |e| "fx#{short_id(e[:effect_id])}×#{e[:runs]} #{e[:duration_ms].round(2)}ms" }.join(' ')
     "flush##{f[:flush_id]}  #{total}ms  触发[#{triggers}]  #{fx}"
   end
 
