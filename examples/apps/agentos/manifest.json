@@ -1,0 +1,21 @@
+{
+  "spec": 1,
+  "kind": "app",
+  "id": "agentos",
+  "name": "AgentOS 桌面",
+  "version": "0.1.0",
+  "description": "把 AgentOS 运行时呈现为 EmeraldOS 桌面的一组窗口（阶段一：HTTP 轮询版）——World 总览 + 每 Agent/Service 一扇窗 + Human 收件箱",
+  "authors": ["AgentOSDesk"],
+  "min_runtime": { "emerald": ">=0.1.0" },
+  "permissions": [],
+  "entry": "src/main.rb",
+  "contributes": {
+    "commands": [{ "id": "agentos.open", "title": "打开 AgentOS" }],
+    "menus": [{ "path": "应用", "command": "agentos.open" }]
+  },
+  "activation": { "on_command": ["agentos.open"] },
+  "window": {
+    "singleton": true,
+    "default_geometry": { "x": 60, "y": 40, "w": 560, "h": 620 }
+  }
+}
