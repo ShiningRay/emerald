@@ -46,8 +46,9 @@ module Emerald
 
     # 启动序列（渲染器外 = F6 安全区）：与桌面无关的服务构造交给
     # Emerald::Runtime（独立宿主同源，行为零分叉）——shell 只补桌面侧：
-    # 注册表/窗口管理器 → 注入 :launcher/:apps/:open_file → 内置应用注册 →
-    # 预装包 seed → /Applications 扫描注册 → 贡献点接线 → 全局快捷键 →
+    # 注册表/窗口管理器 → 注入 :launcher/:apps/:open_file/:launch_app →
+    # 内置应用注册 → 预装包 seed → /Applications 扫描注册 + 包内 Service
+    # 装载 → 贡献点接线 → 全局快捷键 →
     # 首渲染前应用主题（防闪变；Runtime 构造时已应用一次，此处按原序列收口）。
     def initialize
       super()
@@ -70,9 +71,14 @@ module Emerald
       @services[:apps] = @registry # 别名：设置应用等按「应用列表」语义读取
       @services[:open_file] = ->(path) { open_file_with(path) }
       @services[:reload_source] = ->(path) { on_app_source_saved(path) }
+      # 正规开窗服务（包内 App 经 ctx[:launch_app] 拉起兄弟窗口的能力面）：
+      # 调用形态 launcher.call(:some_app, { endpoint: 'x' })——argv 收成 Hash，
+      # 展开为关键字参数的动作留在宿主侧（包内只见「id + 参数 Hash」一条契约）。
+      @services[:launch_app] = ->(id, argv = {}) { launch_app(id, **argv) }
       register_builtin_apps
       seed_preinstalled_packages
       scan_installed_apps
+      register_package_services
       register_contributions
       register_system_commands
       @hub.activate_startup(@services)
@@ -108,9 +114,24 @@ module Emerald
       end
     end
 
+    # 包内 Service 装载：本轮 scan/reload 中包 entry 定义的 Service 子类逐个
+    # 注册 ServiceHub（包内不自启——激活是宿主能力），再幂等 activate_startup
+    # （on_startup 声明的服务随包安装/系统启动即拉起服务进程）。
+    def register_package_services
+      @apphost.defined_services.each do |klass|
+        next if @hub.services.any? { |svc| svc.class == klass }
+
+        @hub.register(klass)
+      end
+      @hub.activate_startup(@services)
+    end
+
     # 包 manifest 贡献点接线（SPEC §4.1）：commands → CommandRegistry +
-    # 快捷键；file_types → FileTypeRouter。v1 所有命令都归约为「打开该应用」
-    # （命令体真正跑包内代码列 v1.1，见 PLAN 实施记录）。
+    # 快捷键；file_types → FileTypeRouter。v1 所有命令都归约为「打开该应用的
+    # 窗口」（命令体真正跑包内代码列 v1.1，见 PLAN 实施记录）——多 App 包的
+    # 包 id 不是任何 App 的 app_id，归约目标按 contributed_command_app 三级
+    # 取值；包内没有可开窗口的 App 时该命令不接线，改为一条 warning 通知
+    # （不抛错：坏包不拖垮整机，见 PLAN §8）。
     def register_contributions
       @installer.list.each do |entry|
         next unless entry['kind'] == 'app'
@@ -121,14 +142,53 @@ module Emerald
         rescue StandardError
           next
         end
+        declared_apps = command_app_fields(manifest)
         manifest.commands.each do |cmd|
           next if @commands.command?(cmd[:id])
 
-          app_id = id.to_sym
+          app_id = contributed_command_app(id, declared_apps[cmd[:id]])
+          if app_id.nil?
+            @notify.push("应用 #{id} 的命令 #{cmd[:id]} 未接线：包内没有可打开的应用窗口",
+                         kind: :warning)
+            next
+          end
           @commands.register(cmd[:id], title: cmd[:title], hotkey: cmd[:hotkey]) { launch_app(app_id) }
           Emerald.hotkey.register(cmd[:hotkey]) { @commands.run(cmd[:id]) } if cmd[:hotkey]
         end
         manifest.file_types.each { |ext| @router.register(ext, id) }
+      end
+    end
+
+    # 贡献命令的开窗目标（SPEC §4.1）：cmd[:app]（显式指明）→ 该包首个已注册
+    # App（多 App 包的默认归约）→ 包 id（单 App 包 / bundled 预装包：类已随
+    # bundle 定义，本次未求值、无映射）。解析不出已注册的 App 返回 nil，调用侧
+    # 跳过并通知。
+    def contributed_command_app(package_id, declared)
+      if declared
+        sym = declared.to_sym
+        # 显式指明却不在注册表（装载失败 / 被内置顶掉）→ 不静默开错窗口
+        return registered_app?(sym) ? sym : nil
+      end
+
+      @apphost.package_app_ids(package_id).find { |aid| registered_app?(aid) } ||
+        (registered_app?(package_id.to_sym) ? package_id.to_sym : nil)
+    end
+
+    def registered_app?(app_id)
+      @registry.apps.any? { |a| a[:id] == app_id }
+    end
+
+    # contributes.commands[].app（可选，SPEC §4.1）→ { 命令 id => app 名 }。
+    # Manifest#commands 的模型面只含 {id,title,hotkey}（声明式模型的公共面），
+    # 接线目标属宿主细节，这里从 manifest.data 回查（未知字段 Manifest 照收）。
+    def command_app_fields(manifest)
+      list = manifest.data.dig('contributes', 'commands')
+      return {} unless list.is_a?(Array)
+
+      list.each_with_object({}) do |c, h|
+        next unless c.is_a?(Hash) && c['id'].is_a?(String) && c['app'].is_a?(String)
+
+        h[c['id']] = c['app']
       end
     end
 
@@ -164,6 +224,7 @@ module Emerald
       result = yield
       id = result[:manifest].id
       report = @apphost.reload(@registry, id)
+      register_package_services
       register_contributions
       case result[:status]
       when :installed then @notify.push("#{result[:manifest].name} 已安装", kind: :success)
@@ -192,18 +253,21 @@ module Emerald
       install_and_register { @installer.install_file(path, bytes) }
     end
 
-    # 卸载：先关该应用全部窗口（复用关闭链路），再删包与 lock
+    # 卸载：先关该应用全部窗口（复用关闭链路），再删包与 lock，最后清编译
+    # 缓存（同 id 重装/换源时不复用旧产物；缓存的键是 id，包目录已删）
     def uninstall_package(id)
       @registry.each_running.select { |i| i.class.app_id == id.to_sym }
                .each { |i| close_window(i.win_id) }
       ok = @installer.uninstall(id)
+      @apphost.invalidate_cache(id)
       @commands.unregister("app.#{id}")
       @notify.push(ok ? "已卸载 #{id}" : "未安装 #{id}", kind: ok ? :success : :warning)
       ok
     end
 
     # Editor 保存钩子（services[:reload_source]）：改动 /Applications 下的
-    # 包源码 → 重编 + reopen 热更新该应用类
+    # 包源码 → 重编 + reopen 热更新该应用类。包内 Service 与安装路径同款收口
+    #（register_package_services：改源码新定义的服务同样进 hub）。
     def on_app_source_saved(path)
       return unless path.start_with?("#{Emerald::Pkg::Installer::APPS_DIR}/")
 
@@ -211,6 +275,7 @@ module Emerald
       return if app_id.nil? || app_id.empty?
 
       report = @apphost.reload(@registry, app_id)
+      register_package_services
       if report[:status] == :failed
         @notify.push("应用 #{app_id} 重载失败（保留上一版本）：#{report[:message]}", kind: :error)
       else

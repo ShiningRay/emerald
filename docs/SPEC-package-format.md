@@ -48,7 +48,9 @@ hello.emz
 ```
 
 - `spec`：本标准版本号，解析器按它分流；未知 `spec` 拒绝安装。
-- `id`：全小写 `[a-z][a-z0-9-]*`，安装后作为目录名与注册键；同 id 重装 = 更新。
+- `id`：全小写 `[a-z][a-z0-9-]*`，安装后作为目录名、安装记录（lock）与编译
+  缓存的键；同 id 重装 = 更新。（包内 App 在 App 注册表里的键是各自的 `app_id`，
+  与包 id 独立，见 §4.1。）
 - `version`：semver。`min_runtime` 不满足 → 拒绝并提示"应用需要更新/系统需要升级"。
 - `permissions`：v1 仅占位不执行（系统无沙箱，见 PLAN 非目标），但作者必须
   如实声明意图（如 `vfs:write`、`net`），为将来强制执行与审计留数据。
@@ -62,7 +64,7 @@ hello.emz
   "kind": "app",
   "entry": "src/main.rb",
   "contributes": {
-    "commands": [{ "id": "hello.say", "title": "问好", "hotkey": "meta+h" }],
+    "commands": [{ "id": "hello.say", "title": "问好", "hotkey": "meta+h", "app": "hello" }],
     "file_types": [".hello"],
     "menus": [{ "path": "应用/工具", "command": "hello.say" }]
   },
@@ -71,8 +73,19 @@ hello.emz
 }
 ```
 
-- `entry` 指向的源码必须定义一个 `Emerald::App` 子类并完成 manifest 四宏中
+- `entry` 指向的源码**至少定义一个** `Emerald::App` 子类并完成 manifest 四宏中
   与 manifest.json 不冲突的部分；两者冲突时 **manifest.json 为准**（声明式优先）。
+  一个包可以定义**多个** `App` 子类（例如一个桌面包同时提供总览窗、列表窗、
+  收件箱），装载时全部注册；包 `id` 只作安装/卸载/缓存/更新记录的键，**不要求
+  等于任何 App 的 app_id**。
+- `entry` 也可定义 `Emerald::Service` 子类（无 UI 的常驻逻辑，见 §4.3 的服务
+  形态约定）：宿主在安装与启动扫描时把包内 Service 子类注册进 ServiceHub，
+  并按其自身的激活声明（如 `activation on_startup: true`）激活——包内不自启。
+  与 App 相同，多 App 包的包 `id` 与 App 的 app_id 各自独立，命令归约见下。
+- `contributes.commands[]` 每项：`id`（必备，形如 `pkg.action`）、`title`、
+  可选 `hotkey`、可选 `app`——`app` 指明该命令应打开的 App（多 App 包用它把
+  命令落到具体窗口）；缺省时取**包内首个已注册的 App**，包内一个 App 都没
+  注册成功则该命令不接线（宿主发一条 warning，不使整体安装失败）。
 - v1 只支持单文件 entry；多文件（包内 `require` 经虚拟 $LOAD_PATH）v1.1。
 
 ### 4.2 Agent（运行于 AgentOS）

@@ -28,6 +28,9 @@ class PkgAppHostTest < Minitest::Test
     Beryl::Timer.backend = nil
     Beryl::Timer.cancel_backend = nil
     remove_hello!
+    %i[DeskWorld DeskAgent DeskLink].each do |name|
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+    end
   end
 
   def remove_hello!
@@ -41,6 +44,33 @@ class PkgAppHostTest < Minitest::Test
 
   def default_src
     "class Hello < Emerald::App\n  app_id :hello\nend\n"
+  end
+
+  # 多 App 包夹具（AgentOS 桌面形态：包 id 与各 App id 都不同 + 一个服务）
+  DESK_MANIFEST = {
+    'spec' => 1, 'kind' => 'app', 'id' => 'desk', 'name' => 'Desk',
+    'version' => '0.1.0', 'entry' => 'src/main.rb',
+  }.freeze
+
+  def desk_src
+    <<~RUBY
+      class DeskWorld < Emerald::App
+        app_id :desk_world
+      end
+
+      class DeskAgent < Emerald::App
+        app_id :desk_agent
+      end
+
+      class DeskLink < Emerald::Service
+        activation on_startup: true
+      end
+    RUBY
+  end
+
+  def install_desk(src = desk_src)
+    files = { 'manifest.json' => JSON.generate(DESK_MANIFEST), 'src/main.rb' => src }
+    Emerald::Pkg::Installer.new(vfs: @vfs, lock: @lock).install_dir('./desk', files)
   end
 
   def new_host(opal_version: @opal, compiler: default_compiler, loader: default_loader)
@@ -152,12 +182,22 @@ class PkgAppHostTest < Minitest::Test
     assert_includes last_report[:message], '已注册'
   end
 
-  def test_app_id_mismatch_fails_isolated
+  # 多 App 包：entry 声明的 app_id 与包 id 不必一致（包 id 只作安装/缓存键）
+  def test_app_id_need_not_match_package_id
     install_hello("class Hello < Emerald::App\n  app_id :other\nend\n")
     @host = new_host
     @host.scan(@registry)
+    assert_equal :registered, last_report[:status]
+    assert_includes @registry.apps.map { |a| a[:id] }, :other
+  end
+
+  # 「至少一个新 App 子类」的要求保留：entry 一个 App 类都没定义才算失败
+  def test_entry_without_app_subclass_fails_isolated
+    install_hello("class Hello\nend\n")
+    @host = new_host
+    @host.scan(@registry)
     assert_equal :failed, last_report[:status]
-    assert_includes last_report[:message], '不一致'
+    assert_includes last_report[:message], '未定义'
     assert_empty @registry.apps # 失败不拖垮整机
   end
 
@@ -174,6 +214,101 @@ class PkgAppHostTest < Minitest::Test
     assert @host.invalidate_cache('hello')
     refute @vfs.exist?('/System/Cache/hello.js')
     refute @vfs.exist?('/System/Cache/hello.json')
+  end
+
+  # ── 多 App 包与包内 Service（AgentOS 桌面形态）────────
+  def test_multi_app_package_registers_every_app_subclass
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    assert_equal :registered, last_report[:status]
+    assert_equal %i[hello desk_world desk_agent], @registry.apps.map { |a| a[:id] }
+  end
+
+  def test_package_service_collected_into_defined_services
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    assert_equal [DeskLink], @host.defined_services
+    assert DeskLink.activation_events[:startup], '包内服务自带激活声明（装载归 shell）'
+  end
+
+  # 每轮 scan/reload 开始重置；本轮扫到的包按「新定义的类 → 包 id 内存映射」
+  # 交付，两边都空则不入列（轮次之间不串场）
+  def test_defined_services_follow_current_scan_round
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    assert_equal [DeskLink], @host.defined_services
+
+    @host.scan(@registry) # 类已在（reopen 语义）→ 按包 id 回查映射仍交付
+    assert_equal [DeskLink], @host.defined_services
+    assert_equal :registered, last_report[:status], '已注册的 App 跳过注册但不报错'
+
+    @host.reload(@registry, 'hello') # 本轮只扫无 Service 的 hello → 重置后为空
+    assert_empty @host.defined_services
+  end
+
+  # reopen（同进程重复 eval，inherited 不再触发）后 defined_services 不得漏装
+  # 包内 Service：Editor 热更新路径上宿主还要靠它重挂服务
+  def test_defined_services_survives_reopen
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+
+    @host.reload(@registry, 'desk')
+    assert_equal [DeskLink], @host.defined_services, 'reopen 后按包 id 回查服务类'
+  end
+
+  def test_entry_without_app_subclass_contributes_no_service
+    install_desk("class DeskLink < Emerald::Service\n  activation on_startup: true\nend\n")
+    @host = new_host
+    @host.scan(@registry)
+    assert_equal :failed, last_report[:status]
+    assert_empty @host.defined_services, '求值失败的包不得留下可装载的服务类'
+  end
+
+  def test_reload_after_reopen_reuses_mapped_classes
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    @vfs.write('/Applications/desk/src/main.rb',
+               "#{desk_src}\nclass DeskWorld\n  def tag; :v2; end\nend\n")
+
+    report = @host.reload(@registry, 'desk')
+    assert_equal :registered, report[:status], 'reopen 不产生新子类 → 按包 id 回查类列表'
+    assert_equal :v2, @registry.launch(:desk_world).tag
+    assert_equal [DeskLink], @host.defined_services, 'Service 同样按包 id 回查'
+  end
+
+  # ── 包 → App id 映射（宿主接线贡献命令用）─────────────
+  def test_package_app_ids_lists_entry_apps_in_definition_order
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    assert_equal %i[desk_world desk_agent], @host.package_app_ids('desk')
+  end
+
+  def test_package_app_ids_empty_without_evaluation
+    install_desk
+    @host = new_host
+    assert_empty @host.package_app_ids('desk'), '未求值过（未 scan / bundled 跳过）→ 无映射'
+    assert_empty @host.package_app_ids('nope'), '未知包 → 空（调用侧自行保底）'
+  end
+
+  def test_package_app_ids_survives_reopen
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    @host.reload(@registry, 'desk')
+    assert_equal %i[desk_world desk_agent], @host.package_app_ids('desk')
+  end
+
+  def test_package_app_ids_string_or_symbol_lookup
+    install_desk
+    @host = new_host
+    @host.scan(@registry)
+    assert_equal @host.package_app_ids('desk'), @host.package_app_ids(:desk)
   end
 
   # ── AppRegistry dispose → deactivate 链（§3.9 遗留修复）──
