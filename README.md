@@ -37,7 +37,8 @@ bundler（`.ruby-version` 已钉）。
 L6  内置应用     About · Files · Editor · Settings · Terminal
 L5  系统服务     AppRegistry · VFS · SettingsStore · NotificationCenter ·
                  ShortcutRegistry · Clipboard · FileTypeRouter ·
-                 Installer/AppHost/Lock · CommandRegistry · ServiceHub
+                 Installer/AppHost/Lock · CommandRegistry · ServiceHub ·
+                 Runtime（服务运行时）/ Standalone（独立宿主）
 L4  桌面外壳     DesktopShell（壁纸/图标网格/菜单栏/任务栏/托盘组装）
 L3  桌面外壳     beryl：WindowFrame · WindowManager · Taskbar · MenuBar
 L2  控件层       beryl：Menu · Select · Tabs · Dialog · Table · List · Tree
@@ -66,6 +67,26 @@ class Calculator < Emerald::App
     end
   end
 end
+```
+
+## 只跑一个应用（Standalone 宿主）
+
+不需要整机桌面也能运行单个 Emerald App——`Emerald::Standalone` 提供
+满视口宿主（服务运行时 + 应用视图 + Toast 堆叠）：
+
+```ruby
+require 'emerald'
+
+Beryl::Renderer.mount_at('app', Emerald::Standalone.boot(Calculator))
+# 或传已 boot 的实例；Runtime 负责服务构建（storage→settings→vfs→notify→…）
+```
+
+这也是 emerald 作为**库**的消费方式（首个第三方应用 emerald-calc 即以此形态
+在独立仓分发）：
+
+```ruby
+# 第三方仓 Gemfile
+gem 'citrine-emerald', path: '../emerald'   # 发布名 citrine-emerald，require 'emerald'
 ```
 
 ## 可分发源码应用（.emz）
@@ -104,9 +125,13 @@ git:https://github.com/u/repo#v1.2.0  # git 导入（支持 ?path= 子目录，m
 ## 状态
 
 **E0–E7 全部落地**（2026-09-15）：骨架 → 最小桌面 → 应用框架 → VFS/Files/Editor →
-图标/设置/主题 → 系统服务（通知/快捷键/剪贴板/终端）→ 打包 → 可分发源码应用。
-测试 361 项（+ beryl 82、citrine 283），Opal 编译验收全绿；
-浏览器端到端验收通过（安装 → 刷新持久 → 热更新 → 开窗渲染）。
+图标/设置/主题 → 系统服务（通知/快捷键/剪贴板/终端）→ 打包 → 可分发源码应用（.emz）。
+测试 383 项（+ beryl 82、citrine 283），Opal 编译验收全绿；浏览器端到端验收通过
+（安装 → 刷新持久 → 热更新 → 开窗渲染）。
+
+在此之上还有两个演进方向已起步：**Runtime/Standalone 独立宿主**（App 可脱离
+桌面单独运行、可被第三方仓 path 依赖）与 **DevTools 调试面板**（元素树 +
+hover 高亮，见 `examples/`）。
 
 ## License
 
