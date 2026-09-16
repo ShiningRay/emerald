@@ -176,3 +176,64 @@ class PkgZipTest < Minitest::Test
     (0...(bytes.size - 3)).reverse_each.find { |i| bytes[i, 4] == sig }
   end
 end
+
+# Zip.write / Crc32 对拍（同一文件，复用 Zlib fixture 纪律）：写出 → 自读回环 +
+# 头部字段（CRC/长度/偏移）逐项对 Zlib/构造参数断言
+class PkgZipWriteTest < Minitest::Test
+  Z = Emerald::Pkg::Zip
+
+  def test_crc32_matches_zlib
+    c = Emerald::Pkg::Crc32
+    assert_equal Zlib.crc32(''), c.of([])
+    assert_equal Zlib.crc32('hello zip'), c.of('hello zip'.bytes)
+    binary = (0..255).map { |i| i }
+    assert_equal Zlib.crc32(binary.pack('C*')), c.of(binary)
+    assert_equal Zlib.crc32('a' * 10_000), c.of(('a' * 10_000).bytes)
+  end
+
+  def test_write_read_roundtrip
+    entries = [
+      Z::Entry.new('manifest.json', false, '{"id":"x"}'.b.bytes),
+      Z::Entry.new('src/main.rb', false, "puts 'hi'\n".b.bytes),
+      Z::Entry.new('文档/说明.txt', false, '内容'.b.bytes),
+    ]
+    read_back = Z.read(Z.write(entries))
+    assert_equal entries.map(&:name), read_back.map(&:name)
+    entries.each_with_index { |e, i| assert_equal e.data, read_back[i].data }
+  end
+
+  def test_write_empty_archive
+    assert_empty Z.read(Z.write([]))
+  end
+
+  def test_written_zip_signatures_and_sizes
+    bytes = Z.write([Z::Entry.new('a.txt', false, 'hello'.bytes)])
+    assert_equal [0x50, 0x4b, 0x03, 0x04], bytes[0, 4]
+    assert_equal [0x50, 0x4b, 0x05, 0x06], bytes[-22, 4], 'EOCD 应收尾（无 comment）'
+
+    # local 头：crc @+14、csize @+18、usize @+22
+    assert_equal Zlib.crc32('hello'), bytes[14, 4].pack('C*').unpack1('V')
+    assert_equal 5, bytes[18, 4].pack('C*').unpack1('V')
+    assert_equal 5, bytes[22, 4].pack('C*').unpack1('V')
+    # central 头：method stored、crc/csize/usize 与 local 一致、lho 指回 0
+    cd = find_sub(bytes, [0x50, 0x4b, 0x01, 0x02])
+    assert_equal 0, bytes[cd + 10, 2].pack('C*').unpack1('v')
+    assert_equal Zlib.crc32('hello'), bytes[cd + 16, 4].pack('C*').unpack1('V')
+    assert_equal 5, bytes[cd + 20, 4].pack('C*').unpack1('V')
+    assert_equal 0, bytes[cd + 42, 4].pack('C*').unpack1('V')
+  end
+
+  def test_written_zip_interops_with_zlib_inflater_not_needed
+    # stored 条目数据段原样存放：本地头（30 + 名长）之后即内容
+    bytes = Z.write([Z::Entry.new('src/main.rb', false, "x = 1\n".bytes)])
+    assert_equal "x = 1\n".bytes, bytes[30 + 'src/main.rb'.size, 6]
+  end
+
+  def test_nul_in_name_raises
+    assert_raises(Z::Unsupported) { Z.write([Z::Entry.new("a\0b", false, 'x'.bytes)]) }
+  end
+
+  def find_sub(bytes, sig)
+    (0...(bytes.size - 3)).reverse_each.find { |i| bytes[i, 4] == sig }
+  end
+end

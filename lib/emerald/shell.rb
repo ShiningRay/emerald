@@ -75,6 +75,12 @@ module Emerald
       # 调用形态 launcher.call(:some_app, { endpoint: 'x' })——argv 收成 Hash，
       # 展开为关键字参数的动作留在宿主侧（包内只见「id + 参数 Hash」一条契约）。
       @services[:launch_app] = ->(id, argv = {}) { launch_app(id, **argv) }
+      # 包管理能力面（Settings「应用管理」区等宿主消费；事件回调专用——
+      # 经 F6 守卫的 install_and_register/uninstall_package 进入）
+      @services[:install_bytes] = ->(filename, bytes) { install_package_bytes(filename, bytes) }
+      @services[:install_git] = ->(url) { install_git_url(url) }
+      @services[:uninstall] = ->(id) { uninstall_package(id) }
+      @services[:installed_list] = -> { @installer.list }
       register_builtin_apps
       seed_preinstalled_packages
       scan_installed_apps
@@ -425,7 +431,11 @@ module Emerald
 
     # 图标块：纵向（图形/emoji + 文字），单击选中（受控选择集）、双击启动
     def icon_tile(key, glyph:, name:, on_open:)
-      box(css_class: icon_tile_class(key),
+      # css_class 用响应式 Proc（G-2）：选中态只 patch 本节点类名、不重建节点——
+      # 立即求值会让第一击的选中重渲染替换整个 tile，第二击落在全新 DOM 节点上，
+      # 浏览器连击计数清零 → 原生 dblclick 永不触发 → 双击启动失灵（表现为
+      # 「图标高亮了但窗口不开」）
+      box(css_class: -> { icon_tile_class(key) },
           on_click: ->(_e) { self.selected_icons = [key] },
           on_dblclick: on_open) do
         box(css_class: 'd-icon-glyph') { glyph }

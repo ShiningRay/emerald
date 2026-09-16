@@ -49,6 +49,8 @@ module Emerald
       state :density_open, default: false
       state :wallpaper_open, default: false
       state :clear_dialog_open, default: false
+      # 应用管理列表刷新计数：安装/卸载回调里 +1，驱动本区重渲染重读 installed_list
+      state :apps_rev, default: 0
 
       # beryl 受控件的 value 约定传 Signal：这里把 store 的某个 key 包成
       # 只读信号壳（.get → store.get，订阅语义原样保留）。
@@ -106,6 +108,7 @@ module Emerald
           appearance_section
           wallpaper_section
           storage_section
+          apps_management_section
           about_section
           nil
         end
@@ -242,6 +245,61 @@ module Emerald
         return format('%.1f KB', kb) if kb < 1024
 
         format('%.1f MB', kb / 1024.0)
+      end
+
+      # ── 应用管理（E7）：安装 .emz / 已安装列表 / 卸载 ──────────
+      #
+      # 安装入口 = 浏览器原生文件选择器（Emerald::FilePick，仅 Opal）；
+      # 卸载/安装动作经 services[:install_bytes]/[:uninstall] 回到 shell 的
+      # F6 守卫管线（装完自动扫描注册 + 通知）。apps_rev 计数驱动本区重读列表
+      # （installed_list 是普通 lambda 无订阅语义，受控 state 补上刷新边界）。
+
+      def apps_management_section
+        group('应用管理') do
+          apps_rev = signal(:apps_rev).get # 订阅：安装/卸载后重读列表
+          row(gap: 10) do
+            button(css_class: 'b-btn', on_click: ->(_e) { pick_and_install }) { '安装 .emz 应用包…' }
+            label(css_class: 'settings-hint') { '选择 .emz 包安装到 /Applications' }
+          end
+          installed_apps_rows(apps_rev)
+          nil
+        end
+      end
+
+      # 事件回调路径：FilePick 的 change/FileReader 都是原生异步回调，
+      # 不在 Effect 内——install_and_register 的 F6 守卫天然满足
+      def pick_and_install
+        installer = ctx && ctx[:install_bytes]
+        return unless installer
+
+        Emerald::FilePick.pick(accept: '.emz') do |filename, bytes|
+          installer.call(filename, bytes)
+          self.apps_rev += 1
+        end
+      end
+
+      def installed_apps_rows(_rev)
+        list = ctx && ctx[:installed_list] && ctx[:installed_list].call
+        if list.nil? || list.empty?
+          label(css_class: 'settings-hint') { '尚未安装第三方应用' }
+          return
+        end
+        list.each do |entry|
+          row(css_class: 'installed-app-row', gap: 8) do
+            label { "#{entry['id']} · v#{entry['version']}" }
+            label(css_class: 'settings-hint') { entry['bundled'] ? '预装' : '第三方' }
+            box(style: { flex: 1 })
+            unless entry['bundled']
+              button(css_class: 'b-btn danger', on_click: ->(_e) { uninstall_app(entry['id']) }) { '卸载' }
+            end
+          end
+        end
+        nil
+      end
+
+      def uninstall_app(id)
+        ctx[:uninstall]&.call(id)
+        self.apps_rev += 1
       end
 
       def about_section

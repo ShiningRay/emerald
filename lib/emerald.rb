@@ -12,6 +12,7 @@ end
 require 'citrine'
 require 'beryl'
 require_relative 'emerald/storage'
+require_relative 'emerald/file_pick'
 require_relative 'emerald/settings'
 require_relative 'emerald/vfs'
 require_relative 'emerald/router'
