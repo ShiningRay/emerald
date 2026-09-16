@@ -18,3 +18,19 @@ Beryl::Renderer.mount_at('app', shell)
 
 # 浏览器验收便利（E7）：console 里可经 window.EmeraldShell 调安装流
 `window.EmeraldShell = shell` if defined?(Opal)
+# （包文件须能从 dev server 同源取到——放 examples/ 目录即可；file:// 打包
+# 产物受浏览器 CORS 限制，此入口仅在 dev server/http 下可用）
+if defined?(Opal)
+  %x{
+    var m = location.search.match(/[?&]install=([^&]+)/);
+    if (m) {
+      fetch(decodeURIComponent(m[1]))
+        .then(function(r) { return r.arrayBuffer(); })
+        .then(function(buf) {
+          var u = new Uint8Array(buf), bytes = new Array(u.length);
+          for (var i = 0; i < u.length; i++) { bytes[i] = u[i]; }
+          #{shell.install_package_bytes(`decodeURIComponent(m[1])`, `bytes`)};
+        });
+    }
+  }
+end
