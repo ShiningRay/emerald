@@ -319,7 +319,7 @@ module Emerald
       menubar
       Beryl::Taskbar.new(wm: @wm).view
       tray
-      toast_stack
+      notification_stack
     end
 
     # 壁纸层：铺满桌面的最底级（--wallpaper 由 Theme 写入 :root）
@@ -427,11 +427,20 @@ module Emerald
       end
     end
 
-    # Toast 堆叠（PLAN §3.5）：auto_dismiss 到期按序号 dismiss
-    def toast_stack
+    # 通知堆叠（PLAN §3.5）：Beryl::Notification（标题+正文+✕）右上角堆叠。
+    # 无显式 title 的消息按 kind 给默认标题；auto_dismiss 到期/手点 ✕ 都按序号 dismiss。
+    DEFAULT_TITLES = { info: '通知', success: '完成', warning: '注意', error: '错误' }.freeze
+
+    def notification_stack
       @notify.each do |note, i|
-        Beryl::Toast.new(msg: note['msg'], kind: note['kind'], duration_ms: 3000,
-                         on_expire: -> { @notify.dismiss(i) }).view
+        Beryl::Notification.new(
+          title: note['title'] || DEFAULT_TITLES.fetch(note['kind'], '通知'),
+          msg: note['msg'], kind: note['kind'],
+          style: { top: "#{46 + i * 84}px" },
+          duration_ms: 4000,
+          on_expire: -> { @notify.dismiss(i) },
+          on_close: -> { @notify.dismiss(i) },
+        ).view
       end
     end
 

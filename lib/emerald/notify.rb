@@ -17,10 +17,12 @@ module Emerald
       @notes = Citrine.signal_list([])
     end
 
-    # 推入一条通知，返回 note 哈希（'msg' / 'kind' / 'actions' 三键）。
+    # 推入一条通知，返回 note 哈希（'msg' / 'kind' / 'actions' 三键；
+    # 传 title 时附带第四键——Beryl::Notification 的标题语义）。
     # 超过 limit 时淘汰最旧的（push_bounded 既有语义）。
-    def push(msg, kind: :info, actions: [])
+    def push(msg, kind: :info, actions: [], title: nil)
       note = { 'msg' => msg, 'kind' => normalize_kind(kind), 'actions' => actions }
+      note['title'] = title if title
       @notes.push_bounded(note, limit)
       note
     end

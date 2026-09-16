@@ -34,8 +34,14 @@ class StickyNote < Emerald::App
     stack(css_class: 'sticky-note', gap: 0) do
       textarea(css_class: 'sticky-note-area', value: signal(:buf),
                on_submit: ->(_e) { save })
-      row(css_class: 'sticky-note-status', gap: 6) do
-        label { dirty ? '● 未保存 · ⌘⏎ 保存' : path.to_s }
+      row(css_class: 'sticky-note-status', gap: 6,
+          style: { align_items: 'center' }) do
+        # 保存钮放左侧：右下角是折角裁剪区（shape DOGEAR），放右侧会被裁
+        Beryl::Button.new(text: '保存', kind: :primary, size: :sm,
+                          disabled: !dirty, on_click: -> { save }).view
+        box(style: { flex: 1 })
+        Beryl::Badge.new(text: '未保存 · ⌘⏎', kind: 'warn').view if dirty
+        label { path.to_s } unless dirty
       end
     end
   end

@@ -32,9 +32,6 @@ class DevToolsApp < Emerald::App
   state(:tree_lines) { [] }
   state(:tree_kind) { :components }
 
-  TAB_STYLE = { padding: '3px 10px', font_size: '12px' }.freeze
-  TAB_ACTIVE_STYLE = { padding: '3px 10px', font_size: '12px', background: '#4f8cff',
-                       border: '1px solid #4f8cff', color: '#ffffff' }.freeze
   HEAD_STYLE = { font_size: '12px', font_weight: '700', color: '#4f8cff',
                  margin: '4px 0 2px' }.freeze
   ROW_STYLE = { font_family: 'ui-monospace, monospace', font_size: '11px',
@@ -73,15 +70,10 @@ class DevToolsApp < Emerald::App
       row(gap: 4, style: { align_items: 'center', flex_shrink: 0 }) do
         label(style: { font_size: '13px', font_weight: '700', color: '#4f8cff',
                        margin_right: '4px' }) { '◆ DevTools' }
-        TABS.each { |name, key| tab_button(name, key) }
       end
-      stack(gap: 2, style: { flex: 1, overflow: 'auto' }) do
-        case tab
-        when :events then events_section
-        when :flushes then flushes_section
-        when :writes then writes_section
-        else tree_section
-        end
+      stack(css_class: 'devtools-tabs', gap: 0, style: { flex: 1, min_height: 0 }) do
+        Beryl::Tabs.new(active: signal(:tab), on_change: ->(k) { self.tab = k },
+                        tabs: tab_defs).view
       end
     end
   end
@@ -145,11 +137,23 @@ class DevToolsApp < Emerald::App
 
   # ── 视图分区 ──────────────────────────────────────────────
 
-  def tab_button(name, key)
-    count = { events: events.size, flushes: flushes.size, writes: writes.size,
-              tree: tree_lines.size }[key]
-    style = tab == key ? TAB_ACTIVE_STYLE : TAB_STYLE
-    button(on_click: -> { self.tab = key }, style: style) { "#{name} #{count}" }
+  # tab 定义：标签带各分区条数（每次渲染现算）；content 插槽归本组件（F2）
+  def tab_defs
+    counts = { events: events.size, flushes: flushes.size,
+               writes: writes.size, tree: tree_lines.size }
+    TABS.map do |name, key|
+      { id: key, label: "#{name} #{counts[key]}",
+        content: -> { section_for(key) } }
+    end
+  end
+
+  def section_for(key)
+    case key
+    when :events then events_section
+    when :flushes then flushes_section
+    when :writes then writes_section
+    else tree_section
+    end
   end
 
   def section_head(text)

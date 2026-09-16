@@ -182,8 +182,21 @@ class Calculator < Emerald::App
   end
 
   def key_button(key)
-    button(on_click: -> { press(key) }, css_class: "calc-key calc-key-#{key}",
-           style: key_style(key)) { KEY_LABELS.fetch(key, key) }
+    Beryl::Button.new(text: KEY_LABELS.fetch(key, key),
+                      kind: key_kind(key),
+                      css_class: "calc-key calc-key-#{key}",
+                      style: key_style(key),
+                      on_click: -> { press(key) }).view
+  end
+
+  # 语义 kind（= 是主操作、C 是危险操作）；键色仍由 key_style 内联样式权威
+  # （b-btn-primary 的主题色被内联样式覆盖，视觉与改造前一致）
+  def key_kind(key)
+    case key
+    when '=' then :primary
+    when 'C' then :danger
+    else :default
+    end
   end
 
   def key_style(key)

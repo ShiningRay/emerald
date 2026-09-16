@@ -13,6 +13,10 @@ class NotifyTest < Minitest::Test
 
     assert_kind_of Hash, note
     assert_equal %w[msg kind actions], note.keys
+
+    titled = center.push('主机已就绪', kind: :success, title: '系统')
+    assert_equal %w[msg kind actions title], titled.keys
+    assert_equal '系统', titled['title']
     assert_equal '已保存', note['msg']
     assert_equal :success, note['kind']
     assert_equal [{ 'label' => '撤销', 'action' => undo }], note['actions']

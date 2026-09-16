@@ -189,6 +189,19 @@
   .b-taskbar { background: var(--panel); border-top: 1px solid var(--line); align-items: center; padding: 0 8px; }
   .b-taskbtn.is-active { border-color: var(--accent); color: #fff; }
   .b-taskbtn.is-minimized { opacity: .55; }
+  /* ── Notification（系统通知：标题+正文+✕，右上堆叠）──────── */
+  .b-notification { position: fixed; right: 16px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 12px; z-index: 4300; min-width: 220px; }
+  .b-notification.error { border-left-color: #f85149; }
+  .b-notification.success { border-left-color: #3fb950; }
+  .b-notification.warn, .b-notification.warning { border-left-color: #d29922; }
+  .b-notification-head { align-items: center; font-weight: 600; }
+  .b-notification-msg { color: var(--dim); margin-top: 2px; }
+  .b-notification-x { margin-left: auto; color: var(--dim); cursor: pointer; padding: 0 4px; font-weight: 400; }
+  .b-notification-x:hover { color: var(--fg); }
+  .b-notification-action { margin-top: 6px; padding: 1px 8px; font-size: 12px; }
+  /* DevTools：Tabs 正文占满剩余空间并自滚动（tab 栏保持常驻） */
+  .devtools-tabs .b-tabs { flex: 1; min-height: 0; }
+  .devtools-tabs .b-tab-body { flex: 1; min-height: 0; overflow: auto; }
   .b-tip { position: fixed; z-index: 5000; background: #000c; color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 5px; pointer-events: none; }
 
   /* ── 桌面专属 ─────────────────────────────────────────── */
