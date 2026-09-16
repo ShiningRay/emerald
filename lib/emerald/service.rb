@@ -38,6 +38,22 @@ module Emerald
       end
     end
 
+    # ── 子类追踪（包内 Service 装载：AppHost 求值 entry 后捕获其中新定义的
+    # 服务类，DesktopShell 据此注册 ServiceHub）────────────────────────
+    # 全部 Emerald::Service 子类，插入序 = 定义序；对齐 Emerald::App 的
+    # app_subclasses 写法（citrine/beryl 均未定义 inherited，挂接安全，
+    # 仍调 super 保持可叠加）。恒以基类接收者查询（Emerald::Service.service_subclasses）。
+    class << self
+      def service_subclasses
+        @service_subclasses ||= []
+      end
+
+      def inherited(subclass)
+        service_subclasses << subclass
+        super
+      end
+    end
+
     def activate(ctx)
       @ctx = ctx
       @activated = true

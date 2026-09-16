@@ -6,7 +6,8 @@ module Emerald
     # /Applications 扫描与源码应用装载（docs/PLAN.md §3.10；D11/D12）：
     # lock（installed.json）为扫描清单 → 读 entry 源码 → 编译缓存命中判定
     #（键 = 源码 sha256 + Opal 版本，SPEC「源码为正本、产物为可丢弃缓存」）→
-    # 求值定义 App 子类 → 注册 AppRegistry。
+    # 求值定义 App 子类 → 注册 AppRegistry（包内 Service 子类另经
+    # defined_services 交给 shell 装载）。
     #
     # IO 边界全部注入（D5 同款，纯 CRuby 可测）：
     # - compiler: callable(ruby_source, app_id) → 可执行文本
@@ -17,11 +18,23 @@ module Emerald
     #
     # 单应用失败绝不拖垮整机（PLAN §8：用户改坏 /Applications ≠ 系统崩）：
     # scan_one 逐条 rescue，结果进 reports 供 shell 通知。
+    #
+    # 多 App 包（AgentOS 桌面：1 个 Service + 4 个窗口 App）：entry 定义的
+    # 全部 Emerald::App 子类一次注册（不再要求 app_id == 包 id），包 → App id
+    # 的映射经 package_app_ids 供宿主接线贡献命令；entry 里定义的
+    # Emerald::Service 子类经 defined_services 交给 shell 注册 ServiceHub
+    # （宿主能力，包内不做自启 hack）。两张映射都留在进程内存里，reopen
+    # （同进程重复 eval，inherited 不再触发）时据此回查上一次的类列表。
     class AppHost
       APPS_DIR = '/Applications'
       CACHE_DIR = '/System/Cache'
 
       attr_reader :reports
+      # 本轮 scan/reload 交付的 Service 子类：新定义的 + reopen（同进程重复
+      # eval，不再触发 inherited）时按包 id 从内存映射回查的（scan/reload 开始
+      # 即重置；求值失败的包不计入）。shell 据此注册 ServiceHub（其 register
+      # 幂等，重复交付无副作用）。
+      attr_reader :defined_services
       # 编译/加载边界可后置注入（shell 测试注入伪实现；浏览器由 shell 构造时给）
       attr_accessor :compiler, :loader
 
@@ -32,11 +45,23 @@ module Emerald
         @loader = loader
         @opal_version = opal_version
         @reports = []
+        @defined_services = []
+        @package_apps = {} # 包 id(String) => [App 类]（reopen 场景的回查映射）
+        @package_services = {} # 包 id(String) => [Service 类]（同上，供 defined_services 回查）
+      end
+
+      # 包 id → 该包 entry 定义的 App id 列表（顺序 = entry 里的定义顺序）。
+      # 宿主接线用：多 App 包的包 id 不是任何 App 的 app_id，贡献命令须归约到
+      # 包内窗口 App（shell 的 contributes 接线）。未装载过（bundled 跳过求值 /
+      # 包不存在）的包返回 []，调用侧自行保底。
+      def package_app_ids(id)
+        @package_apps[id.to_s].to_a.map(&:app_id)
       end
 
       # 扫描全部已装应用并注册；返回 reports（shell 据此发通知）。
       def scan(registry)
         @reports = []
+        @defined_services = []
         @lock.entries.each { |entry| scan_one(registry, entry) }
         @reports
       end
@@ -48,6 +73,7 @@ module Emerald
         entry = @lock.get(id)
         return report(id, :skipped, '未安装') unless entry
 
+        @defined_services = []
         scan_one(registry, entry, force: true)
       end
 
@@ -90,10 +116,9 @@ module Emerald
           executable = compile!(id, src, sha)
           detail = '编译'
         end
-        klass = evaluate!(executable, id)
-        # reload（force）也可能来自「装了但从未注册成功」的应用，此时要注册；
-        # reopen 场景 registered? 为真，跳过（重复 register 会 raise）
-        registry.register(klass) unless registered?(registry, id)
+        klasses = evaluate!(executable, id)
+        # 多 App 包逐个注册；同 app_id 已注册的跳过（内置优先 / 前一轮已注册）
+        klasses.each { |klass| registry.register(klass) unless registered?(registry, klass.app_id) }
         report(id, :registered, detail)
       rescue StandardError => e
         # 单应用失败不拖垮整机（坏包/坏源码/缺编译器都到这）；本次失败的
@@ -112,19 +137,36 @@ module Emerald
         js
       end
 
-      # 求值可执行文本 → 应用类。新定义子类直接取；reopen（reload）场景按
-      # app_id 回查（manifest 为准：entry 的类必须声明与包 id 一致的 app_id）。
+      # 求值可执行文本 → 本次装载的 App 类列表。
+      # 注册「entry 定义的全部新 App 子类」（多 App 包：单次求值收齐所有窗口
+      # App；单应用包即长度 1）——不再要求 app_id 与包 id 一致，包 id 只是
+      # 安装/卸载/缓存的键。reopen（reload）不产生新子类，按包 id 从内存映射
+      # 回查上一次的类列表（进程内存，非持久化）。
+      # 同时收集本次交付的 Service 子类（defined_services 的填充点）。
       def evaluate!(executable, id)
         raise 'AppHost 需要注入 loader' unless @loader
 
-        before = Emerald::App.app_subclasses.dup
+        apps_before = Emerald::App.app_subclasses.dup
+        services_before = Emerald::Service.service_subclasses.dup
         @loader.call(executable)
-        fresh = Emerald::App.app_subclasses - before
-        klass = fresh.first || Emerald::App.app_subclasses.reverse.find { |k| k.app_id == id.to_sym }
-        raise Json::Invalid, "entry 未定义 app_id 为 #{id} 的 Emerald::App 子类" if klass.nil?
-        raise Json::Invalid, "entry 声明的 app_id (#{klass.app_id}) 与包 id (#{id}) 不一致" unless klass.app_id == id.to_sym
+        fresh = Emerald::App.app_subclasses - apps_before
+        klasses = fresh.empty? ? @package_apps[id.to_s].to_a : fresh
+        raise Json::Invalid, "entry 未定义 Emerald::App 子类（包 #{id}）" if klasses.empty?
 
-        klass
+        @package_apps[id.to_s] = klasses
+        @defined_services += package_services(id.to_s, services_before)
+        klasses
+      end
+
+      # 本次求值交付的 Service 子类：新定义的；reopen（同进程重复 eval，
+      # inherited 不再触发）则按包 id 回查上一次的类列表——照 @package_apps 的
+      # 做法，否则 reload 后 defined_services 恒为空、包内 Service 漏装。两边都
+      # 空则记空表（包内确实没有服务类）。
+      def package_services(id, services_before)
+        fresh = Emerald::Service.service_subclasses - services_before
+        services = fresh.empty? ? @package_services[id].to_a : fresh
+        @package_services[id] = services
+        services
       end
 
       def registered?(registry, id)

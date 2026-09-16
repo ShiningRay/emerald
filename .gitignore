@@ -6,3 +6,4 @@ build/
 Gemfile.lock
 examples/*.js
 examples/standalone/*.js
+examples/*.emz
